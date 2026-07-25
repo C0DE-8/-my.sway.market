@@ -61,15 +61,37 @@ async function buildHealthReport() {
   }));
 
   checks.push(await runCheck("auth.users_login_query", async () => {
+    try {
+      const [rows] = await db.query(
+        `
+        SELECT
+          id,
+          full_name,
+          username,
+          email,
+          password_hash,
+          role,
+          is_verified
+        FROM users
+        WHERE LOWER(email) = ? OR LOWER(username) = ?
+        LIMIT 1
+        `,
+        ["__health_check__", "__health_check__"]
+      );
+      return { schema: "modern", rows: rows.length };
+    } catch (error) {
+      if (!String(error.message || "").includes("Unknown column")) throw error;
+    }
+
     const [rows] = await db.query(
       `
       SELECT
         id,
-        full_name,
+        name AS full_name,
         username,
         email,
-        password_hash,
-        role,
+        password AS password_hash,
+        CASE WHEN isAdmin = 1 THEN 'admin' ELSE 'user' END AS role,
         is_verified
       FROM users
       WHERE LOWER(email) = ? OR LOWER(username) = ?
@@ -77,15 +99,30 @@ async function buildHealthReport() {
       `,
       ["__health_check__", "__health_check__"]
     );
-    return { rows: rows.length };
+    return { schema: "legacy", rows: rows.length };
   }));
 
   checks.push(await runCheck("auth.admins_login_query", async () => {
+    try {
+      const [rows] = await db.query(
+        "SELECT id, name, email, password_hash FROM admins WHERE email = ? LIMIT 1",
+        ["__health_check__"]
+      );
+      return { schema: "admins", rows: rows.length };
+    } catch (error) {
+      if (!String(error.message || "").includes("doesn't exist")) throw error;
+    }
+
     const [rows] = await db.query(
-      "SELECT id, name, email, password_hash FROM admins WHERE email = ? LIMIT 1",
+      `
+      SELECT id, name, email, password AS password_hash
+      FROM users
+      WHERE LOWER(email) = ? AND isAdmin = 1
+      LIMIT 1
+      `,
       ["__health_check__"]
     );
-    return { rows: rows.length };
+    return { schema: "users.isAdmin", rows: rows.length };
   }));
 
   checks.push(await runCheck("auth.jwt_sign", async () => {

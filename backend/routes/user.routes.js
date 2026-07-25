@@ -19,6 +19,184 @@ function signToken(payload) {
 function genOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
+
+function isBcryptHash(value) {
+  return /^\$2[aby]\$\d{2}\$/.test(String(value || ""));
+}
+
+async function verifyPassword(inputPassword, storedPassword) {
+  if (!storedPassword) return false;
+  if (isBcryptHash(storedPassword)) {
+    return bcrypt.compare(String(inputPassword), storedPassword);
+  }
+  return String(inputPassword) === String(storedPassword);
+}
+
+async function findLoginUser(cleanIdentifier) {
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT
+        id,
+        full_name,
+        username,
+        email,
+        password_hash,
+        role,
+        is_verified
+      FROM users
+      WHERE LOWER(email) = ? OR LOWER(username) = ?
+      LIMIT 1
+      `,
+      [cleanIdentifier, cleanIdentifier]
+    );
+    return rows;
+  } catch (error) {
+    if (!String(error.message || "").includes("Unknown column")) throw error;
+  }
+
+  const [rows] = await pool.query(
+    `
+    SELECT
+      id,
+      name AS full_name,
+      username,
+      email,
+      password AS password_hash,
+      CASE WHEN isAdmin = 1 THEN 'admin' ELSE 'user' END AS role,
+      is_verified
+    FROM users
+    WHERE LOWER(email) = ? OR LOWER(username) = ?
+    LIMIT 1
+    `,
+    [cleanIdentifier, cleanIdentifier]
+  );
+  return rows;
+}
+
+async function findUserProfile(userId) {
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT
+        id,
+        full_name,
+        username,
+        address,
+        city,
+        zipcode,
+        country,
+        phone,
+        email,
+        role,
+        is_verified,
+
+        main_balance,
+        profit_balance,
+        investment_balance,
+
+        account_type,
+        trade_progress,
+        signal_strength,
+
+        account_status,
+        copy_trading_status,
+        trading_status,
+
+        created_at
+      FROM users
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [userId]
+    );
+    return rows;
+  } catch (error) {
+    if (!String(error.message || "").includes("Unknown column")) throw error;
+  }
+
+  const [rows] = await pool.query(
+    `
+    SELECT
+      id,
+      name AS full_name,
+      username,
+      address,
+      NULL AS city,
+      NULL AS zipcode,
+      nationality AS country,
+      phone_number AS phone,
+      email,
+      CASE WHEN isAdmin = 1 THEN 'admin' ELSE 'user' END AS role,
+      is_verified,
+
+      trading_balance AS main_balance,
+      holding_balance AS profit_balance,
+      staking_balance AS investment_balance,
+
+      account_type,
+      0 AS trade_progress,
+      signal_strength,
+
+      'active' AS account_status,
+      'inactive' AS copy_trading_status,
+      'active' AS trading_status,
+
+      created_at
+    FROM users
+    WHERE id = ?
+    LIMIT 1
+    `,
+    [userId]
+  );
+  return rows;
+}
+
+async function findUserBalances(userId) {
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT
+        main_balance,
+        profit_balance,
+        investment_balance,
+        account_type,
+        trade_progress,
+        signal_strength,
+        account_status,
+        copy_trading_status,
+        trading_status
+      FROM users
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [userId]
+    );
+    return rows;
+  } catch (error) {
+    if (!String(error.message || "").includes("Unknown column")) throw error;
+  }
+
+  const [rows] = await pool.query(
+    `
+    SELECT
+      trading_balance AS main_balance,
+      holding_balance AS profit_balance,
+      staking_balance AS investment_balance,
+      account_type,
+      0 AS trade_progress,
+      signal_strength,
+      'active' AS account_status,
+      'inactive' AS copy_trading_status,
+      'active' AS trading_status
+    FROM users
+    WHERE id = ?
+    LIMIT 1
+    `,
+    [userId]
+  );
+  return rows;
+}
 const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
@@ -240,22 +418,7 @@ router.post("/login", async (req, res) => {
 
     const cleanIdentifier = String(identifier).trim().toLowerCase();
 
-    const [rows] = await pool.query(
-      `
-      SELECT 
-        id,
-        full_name,
-        username,
-        email,
-        password_hash,
-        role,
-        is_verified
-      FROM users
-      WHERE LOWER(email) = ? OR LOWER(username) = ?
-      LIMIT 1
-      `,
-      [cleanIdentifier, cleanIdentifier]
-    );
+    const rows = await findLoginUser(cleanIdentifier);
 
     if (!rows.length) {
       return res.status(401).json({ message: "Invalid credentials" });
@@ -269,7 +432,7 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    const ok = await bcrypt.compare(String(password), user.password_hash);
+    const ok = await verifyPassword(password, user.password_hash);
     if (!ok) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
@@ -324,22 +487,7 @@ router.post("/login-no-email", async (req, res) => {
 
     const cleanIdentifier = String(identifier).trim().toLowerCase();
 
-    const [rows] = await pool.query(
-      `
-      SELECT 
-        id,
-        full_name,
-        username,
-        email,
-        password_hash,
-        role,
-        is_verified
-      FROM users
-      WHERE LOWER(email) = ? OR LOWER(username) = ?
-      LIMIT 1
-      `,
-      [cleanIdentifier, cleanIdentifier]
-    );
+    const rows = await findLoginUser(cleanIdentifier);
 
     if (!rows.length) {
       return res.status(401).json({ message: "Invalid credentials" });
@@ -353,7 +501,7 @@ router.post("/login-no-email", async (req, res) => {
       });
     }
 
-    const ok = await bcrypt.compare(String(password), user.password_hash);
+    const ok = await verifyPassword(password, user.password_hash);
     if (!ok) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
@@ -430,40 +578,7 @@ router.patch("/change-password", auth, async (req, res) => {
 router.get("/me", auth, async (req, res) => {
   try {
     // 1) Get user + main balances + statuses
-    const [rows] = await pool.query(
-      `
-      SELECT
-        id,
-        full_name,
-        username,
-        address,
-        city,
-        zipcode,
-        country,
-        phone,
-        email,
-        role,
-        is_verified,
-
-        main_balance,
-        profit_balance,
-        investment_balance,
-
-        account_type,
-        trade_progress,
-        signal_strength,
-
-        account_status,
-        copy_trading_status,
-        trading_status,
-
-        created_at
-      FROM users
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [req.user.id]
-    );
+    const rows = await findUserProfile(req.user.id);
 
     if (!rows.length) {
       return res.status(404).json({ message: "User not found" });
@@ -508,24 +623,7 @@ router.get("/balances", auth, async (req, res) => {
     const userId = req.user.id;
 
     // 1️⃣ Get main & trading balances from users table
-    const [userRows] = await pool.query(
-      `
-      SELECT
-        main_balance,
-        profit_balance,
-        investment_balance,
-        account_type,
-        trade_progress,
-        signal_strength,
-        account_status,
-        copy_trading_status,
-        trading_status
-      FROM users
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [userId]
-    );
+    const userRows = await findUserBalances(userId);
 
     if (!userRows.length) {
       return res.status(404).json({ message: "User not found" });

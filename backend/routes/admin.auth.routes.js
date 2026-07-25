@@ -46,6 +46,45 @@ function signToken(payload) {
     expiresIn: "7d",
   });
 }
+
+function isBcryptHash(value) {
+  return /^\$2[aby]\$\d{2}\$/.test(String(value || ""));
+}
+
+async function verifyPassword(inputPassword, storedPassword) {
+  if (!storedPassword) return false;
+  if (isBcryptHash(storedPassword)) {
+    return bcrypt.compare(String(inputPassword), storedPassword);
+  }
+  return String(inputPassword) === String(storedPassword);
+}
+
+async function findAdminByEmail(cleanEmail) {
+  try {
+    const [rows] = await pool.query(
+      "SELECT id, name, email, password_hash FROM admins WHERE email = ? LIMIT 1",
+      [cleanEmail]
+    );
+    return rows;
+  } catch (error) {
+    if (!String(error.message || "").includes("doesn't exist")) throw error;
+  }
+
+  const [rows] = await pool.query(
+    `
+    SELECT
+      id,
+      name,
+      email,
+      password AS password_hash
+    FROM users
+    WHERE LOWER(email) = ? AND isAdmin = 1
+    LIMIT 1
+    `,
+    [cleanEmail]
+  );
+  return rows;
+}
 // helper: attach crypto balances as { BTC: "0.00", ETH: "0.00", ... }
 function attachBalances(users, balancesRows) {
   const map = new Map(); // user_id -> balances object
@@ -156,15 +195,12 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ message: "email and password are required" });
     }
 
-    const [rows] = await pool.query(
-      "SELECT id, name, email, password_hash FROM admins WHERE email = ? LIMIT 1",
-      [cleanEmail]
-    );
+    const rows = await findAdminByEmail(cleanEmail);
 
     if (!rows.length) return res.status(401).json({ message: "Invalid credentials" });
 
     const admin = rows[0];
-    const ok = await bcrypt.compare(password, admin.password_hash);
+    const ok = await verifyPassword(password, admin.password_hash);
     if (!ok) return res.status(401).json({ message: "Invalid credentials" });
 
     const token = signToken({ id: admin.id, role: "admin", email: admin.email });

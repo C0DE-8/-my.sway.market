@@ -288,6 +288,7 @@
       } catch (err) {
         const status = err?.response?.status;
         const msg = err?.response?.data?.message || "Login failed. Please try again.";
+        const detail = err?.response?.data?.error;
 
         // 403 -> not verified
         if (status === 403) {
@@ -297,6 +298,8 @@
           }, 1200);
         } else if (status === 401) {
           showAlert("error", "Invalid email/username or password.");
+        } else if (status === 500 && detail) {
+          showAlert("error", `${msg}: ${detail}`);
         } else {
           showAlert("error", msg);
         }
