@@ -1,14 +1,46 @@
-// db.js
-const mysql = require("mysql2/promise");
+require("dotenv").config();
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASS || "",
-  database: process.env.DB_NAME || "investment_db",
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
+const { connectProject } = require("./diamond-sql");
+
+const gateway = connectProject(process.env.SITE_ID, {
+  apiKey: process.env.API_KEY,
+  dbmsUrl: process.env.DBMS_URL,
+  timeoutMs: process.env.DBMS_TIMEOUT_MS || 15000,
 });
 
-module.exports = pool;
+function mysql2Tuple(result) {
+  return [result, []];
+}
+
+const db = {
+  async query(sql, params = []) {
+    return mysql2Tuple(await gateway.query(sql, params));
+  },
+
+  async execute(sql, params = []) {
+    return mysql2Tuple(await gateway.execute(sql, params));
+  },
+
+  status() {
+    return gateway.status();
+  },
+
+  async getConnection() {
+    const connection = await gateway.getConnection();
+
+    return {
+      async query(sql, params = []) {
+        return mysql2Tuple(await connection.query(sql, params));
+      },
+      async execute(sql, params = []) {
+        return mysql2Tuple(await connection.execute(sql, params));
+      },
+      beginTransaction: connection.beginTransaction,
+      commit: connection.commit,
+      rollback: connection.rollback,
+      release: connection.release,
+    };
+  },
+};
+
+module.exports = db;

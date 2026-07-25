@@ -7,6 +7,7 @@ const path = require("path");
 
 const adminAuthRoutes = require("./routes/admin.auth.routes");
 const userRoutes = require("./routes/user.routes");
+const db = require("./db");
 
 const app = express();
 
@@ -55,6 +56,15 @@ app.use(
    ========================================================= */
 app.get("/", (req, res) => {
   res.json({ ok: true, service: "Investment Platform API" });
+});
+
+app.get("/health", async (req, res) => {
+  try {
+    const status = await db.status();
+    res.json({ ok: true, service: "Investment Platform API", gateway: status });
+  } catch (error) {
+    res.status(503).json({ ok: false, service: "Investment Platform API", error: error.message });
+  }
 });
 
 /* =========================================================
