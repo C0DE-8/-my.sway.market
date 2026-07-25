@@ -1522,6 +1522,8 @@ router.get("/investments", auth, async (req, res) => {
         p.name AS plan_name,
         ui.amount, ui.roi_percent,
         ui.expected_profit, ui.expected_total,
+        ui.actual_profit_loss, ui.final_total,
+        ui.admin_note,
         ui.duration_days, ui.status,
         ui.started_at, ui.ends_at, ui.completed_at,
         ui.created_at, ui.updated_at
@@ -1555,6 +1557,8 @@ router.get("/investments/:id", auth, async (req, res) => {
         p.name AS plan_name,
         ui.amount, ui.roi_percent,
         ui.expected_profit, ui.expected_total,
+        ui.actual_profit_loss, ui.final_total,
+        ui.admin_note,
         ui.duration_days, ui.status,
         ui.started_at, ui.ends_at, ui.completed_at,
         ui.created_at, ui.updated_at

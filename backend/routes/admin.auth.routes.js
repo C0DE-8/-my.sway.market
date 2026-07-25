@@ -1581,6 +1581,211 @@ router.delete("/plans/:id", auth, adminOnly, async (req, res) => {
   }
 });
 
+// ========================= ADMIN: List User Investments ========================= //
+router.get("/investments", auth, adminOnly, async (req, res) => {
+  try {
+    const status = req.query.status ? String(req.query.status).trim().toLowerCase() : "";
+    const userId = req.query.user_id ? Number(req.query.user_id) : null;
+    const allowed = new Set(["active", "completed", "cancelled"]);
+
+    const where = [];
+    const params = [];
+
+    if (status) {
+      if (!allowed.has(status)) return res.status(400).json({ message: "Invalid status filter" });
+      where.push("ui.status = ?");
+      params.push(status);
+    }
+
+    if (userId) {
+      where.push("ui.user_id = ?");
+      params.push(userId);
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        ui.id,
+        ui.user_id,
+        u.full_name,
+        u.username,
+        u.email,
+        ui.plan_id,
+        p.name AS plan_name,
+        ui.amount,
+        ui.roi_percent,
+        ui.expected_profit,
+        ui.expected_total,
+        ui.actual_profit_loss,
+        ui.final_total,
+        ui.duration_days,
+        ui.status,
+        ui.admin_note,
+        ui.started_at,
+        ui.ends_at,
+        ui.completed_at,
+        ui.created_at,
+        ui.updated_at
+      FROM user_investments ui
+      JOIN users u ON u.id = ui.user_id
+      JOIN investment_plans p ON p.id = ui.plan_id
+      ${where.length ? "WHERE " + where.join(" AND ") : ""}
+      ORDER BY ui.created_at DESC
+      `,
+      params
+    );
+
+    return res.json({ count: rows.length, investments: rows });
+  } catch (err) {
+    return res.status(500).json({ message: "Server error", error: String(err) });
+  }
+});
+
+// ========================= ADMIN: Add Profit/Loss To Investment ========================= //
+router.patch("/investments/:id/result", auth, adminOnly, async (req, res) => {
+  try {
+    const investmentId = Number(req.params.id);
+    if (!Number.isInteger(investmentId) || investmentId <= 0) {
+      return res.status(400).json({ message: "Invalid investment id" });
+    }
+
+    const actual_profit_loss = toNum(req.body.actual_profit_loss);
+    const admin_note = req.body.admin_note === undefined ? null : String(req.body.admin_note || "").trim();
+
+    if (!Number.isFinite(actual_profit_loss)) {
+      return res.status(400).json({ message: "actual_profit_loss must be a number" });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT id, amount, status FROM user_investments WHERE id = ? LIMIT 1`,
+      [investmentId]
+    );
+
+    if (!rows.length) return res.status(404).json({ message: "Investment not found" });
+    if (rows[0].status === "completed") {
+      return res.status(400).json({ message: "Completed investments cannot be edited" });
+    }
+
+    const amount = Number(rows[0].amount) || 0;
+    const final_total = Math.max(0, Number((amount + actual_profit_loss).toFixed(2)));
+
+    await pool.query(
+      `
+      UPDATE user_investments
+      SET actual_profit_loss = ?,
+          final_total = ?,
+          admin_note = ?,
+          updated_at = NOW()
+      WHERE id = ?
+      `,
+      [actual_profit_loss, final_total, admin_note || null, investmentId]
+    );
+
+    return res.json({
+      message: "Investment result updated",
+      investment_id: investmentId,
+      actual_profit_loss,
+      final_total,
+    });
+  } catch (err) {
+    return res.status(500).json({ message: "Server error", error: String(err) });
+  }
+});
+
+// ========================= ADMIN: Settle Investment To User Main Wallet ========================= //
+router.post("/investments/:id/settle", auth, adminOnly, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const adminId = req.user.id;
+    const investmentId = Number(req.params.id);
+
+    if (!Number.isInteger(investmentId) || investmentId <= 0) {
+      return res.status(400).json({ message: "Invalid investment id" });
+    }
+
+    await conn.beginTransaction();
+
+    const [rows] = await conn.query(
+      `
+      SELECT id, user_id, amount, actual_profit_loss, final_total, status
+      FROM user_investments
+      WHERE id = ?
+      FOR UPDATE
+      `,
+      [investmentId]
+    );
+
+    if (!rows.length) {
+      await conn.rollback();
+      return res.status(404).json({ message: "Investment not found" });
+    }
+
+    const investment = rows[0];
+    if (investment.status === "completed") {
+      await conn.rollback();
+      return res.status(400).json({ message: "Investment already completed" });
+    }
+
+    const amount = Number(investment.amount) || 0;
+    const actual = Number(investment.actual_profit_loss) || 0;
+    const finalTotal = Number(investment.final_total) > 0
+      ? Number(investment.final_total)
+      : Math.max(0, Number((amount + actual).toFixed(2)));
+
+    await conn.query(
+      `
+      UPDATE users
+      SET investment_balance = GREATEST(investment_balance - ?, 0),
+          main_balance = main_balance + ?,
+          updated_at = NOW()
+      WHERE id = ?
+      `,
+      [amount, finalTotal, investment.user_id]
+    );
+
+    await conn.query(
+      `
+      UPDATE user_investments
+      SET final_total = ?,
+          status = 'completed',
+          completed_at = NOW(),
+          settled_by = ?,
+          updated_at = NOW()
+      WHERE id = ?
+      `,
+      [finalTotal, adminId, investmentId]
+    );
+
+    await conn.query(
+      `
+      INSERT INTO notifications (user_id, type, title, message, created_by, created_at)
+      VALUES (?, 'investment', 'Investment Completed', ?, ?, NOW())
+      `,
+      [
+        investment.user_id,
+        `Your investment has been completed. ${finalTotal.toFixed(2)} has been sent to your main wallet.`,
+        adminId,
+      ]
+    );
+
+    await conn.commit();
+
+    return res.json({
+      message: "Investment settled to user main wallet",
+      investment_id: investmentId,
+      user_id: investment.user_id,
+      principal: amount,
+      actual_profit_loss: actual,
+      credited_to_main_balance: finalTotal,
+    });
+  } catch (err) {
+    try { await conn.rollback(); } catch (_) {}
+    return res.status(500).json({ message: "Server error", error: String(err) });
+  } finally {
+    conn.release();
+  }
+});
+
 
 // ========================= ADMIN: Get All KYC (with filters + pagination) ========================= //
 router.get("/kyc", auth, adminOnly, async (req, res) => {

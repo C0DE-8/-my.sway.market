@@ -261,6 +261,47 @@
           </div>
         </div>
 
+        <!-- User Investments -->
+        <div class="mt-5 rounded-3xl card p-0">
+          <div class="px-5 py-4 flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div class="font-extrabold">User Plan Investments</div>
+              <div class="text-sm text-white/60">Set profit/loss and settle final returns into the user main wallet.</div>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <select id="investment_status" class="rounded-2xl input px-4 py-3">
+                <option value="">All investments</option>
+                <option value="active">Active</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+              <button id="btnReloadInvestments" class="rounded-2xl btn-ghost px-4 py-3 font-extrabold">Reload Investments</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>User</th>
+                  <th>Plan</th>
+                  <th>Amount</th>
+                  <th>Expected</th>
+                  <th>Profit/Loss</th>
+                  <th>Final</th>
+                  <th>Status</th>
+                  <th>Ends</th>
+                  <th style="min-width:360px;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="investmentsTbody">
+                <tr><td colspan="10" class="text-white/60">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- Footer -->
         <div class="mt-7 text-center text-xs text-white/45">
           © <span id="yr"></span> Upcoinmeta • Admin Console
@@ -382,12 +423,15 @@
 
     const alertBox = document.getElementById("alert");
     const tbody = document.getElementById("tbody");
+    const investmentsTbody = document.getElementById("investmentsTbody");
     const metaLine = document.getElementById("metaLine");
     const lastLoaded = document.getElementById("lastLoaded");
 
     const qEl = document.getElementById("q");
     const activeOnlyEl = document.getElementById("active_only");
     const btnExport = document.getElementById("btnExport");
+    const investmentStatusEl = document.getElementById("investment_status");
+    const btnReloadInvestments = document.getElementById("btnReloadInvestments");
 
     const btnNew = document.getElementById("btnNew");
     const btnReload = document.getElementById("btnReload");
@@ -415,6 +459,7 @@
 
     let PLANS = [];
     let VIEW = [];
+    let INVESTMENTS = [];
     let EDIT_ID = null;
 
     function showAlert(type, msg) {
@@ -453,6 +498,17 @@
 
     function pillActive(v){
       return v ? `<span class="pill on">ACTIVE</span>` : `<span class="pill off">INACTIVE</span>`;
+    }
+
+    function pillStatus(v){
+      const s = String(v || "").toLowerCase();
+      if (s === "active") return `<span class="pill on">ACTIVE</span>`;
+      if (s === "completed") return `<span class="pill on">COMPLETED</span>`;
+      return `<span class="pill off">${esc(s || "UNKNOWN").toUpperCase()}</span>`;
+    }
+
+    function fmtMoney(n){
+      return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
     function openModal(){ modalBackdrop.classList.add("modal-open"); }
@@ -557,6 +613,98 @@
         }
         showAlert("error", msg);
         tbody.innerHTML = `<tr><td colspan="10" class="text-white/60">Error loading plans.</td></tr>`;
+      }
+    }
+
+    async function loadInvestments(){
+      investmentsTbody.innerHTML = `<tr><td colspan="10" class="text-white/60">Loading investments…</td></tr>`;
+      try {
+        const status = investmentStatusEl.value || "";
+        const res = await api().get(`/investments${status ? `?status=${encodeURIComponent(status)}` : ""}`);
+        INVESTMENTS = Array.isArray(res.data?.investments) ? res.data.investments : [];
+        renderInvestments();
+      } catch (err) {
+        const msg = err?.response?.data?.message || "Failed to load investments.";
+        showAlert("error", msg);
+        investmentsTbody.innerHTML = `<tr><td colspan="10" class="text-white/60">Error loading investments.</td></tr>`;
+      }
+    }
+
+    function renderInvestments(){
+      if (!INVESTMENTS.length) {
+        investmentsTbody.innerHTML = `<tr><td colspan="10" class="text-white/60">No investments found.</td></tr>`;
+        return;
+      }
+
+      investmentsTbody.innerHTML = INVESTMENTS.map(inv => {
+        const isCompleted = String(inv.status || "").toLowerCase() === "completed";
+        const actions = isCompleted
+          ? `<span class="text-white/50 font-semibold">Settled</span>`
+          : `
+            <div class="flex flex-wrap gap-2">
+              <button class="rounded-2xl btn-primary px-4 py-2 font-extrabold" onclick="editInvestmentResult(${Number(inv.id)})">Set Profit/Loss</button>
+              <button class="rounded-2xl btn-good px-4 py-2 font-extrabold" onclick="settleInvestment(${Number(inv.id)})">Settle</button>
+            </div>
+          `;
+
+        return `
+          <tr>
+            <td class="text-white/70 font-semibold">#${esc(inv.id)}</td>
+            <td>
+              <div class="font-extrabold">${esc(inv.full_name || inv.username || "User")}</div>
+              <div class="text-xs text-white/45">${esc(inv.email || "")}</div>
+            </td>
+            <td>
+              <div class="font-extrabold">${esc(inv.plan_name)}</div>
+              <div class="text-xs text-white/45">Plan #${esc(inv.plan_id)}</div>
+            </td>
+            <td>$${fmtMoney(inv.amount)}</td>
+            <td>$${fmtMoney(inv.expected_total)}</td>
+            <td>$${fmtMoney(inv.actual_profit_loss)}</td>
+            <td>$${fmtMoney(inv.final_total || inv.expected_total)}</td>
+            <td>${pillStatus(inv.status)}</td>
+            <td class="text-white/60">${esc(fmtDate(inv.ends_at))}</td>
+            <td>${actions}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    window.editInvestmentResult = async function(id){
+      const inv = INVESTMENTS.find(x => Number(x.id) === Number(id));
+      if (!inv) return showAlert("warn", "Investment not found.");
+
+      const current = inv.actual_profit_loss ?? inv.expected_profit ?? 0;
+      const raw = prompt("Enter profit or loss amount. Use a negative number for loss.", String(current));
+      if (raw === null) return;
+
+      const actual_profit_loss = Number(raw);
+      if (!Number.isFinite(actual_profit_loss)) return showAlert("error", "Profit/loss must be a number.");
+
+      const admin_note = prompt("Optional note for user:", inv.admin_note || "") || "";
+
+      try {
+        await api().patch(`/investments/${id}/result`, { actual_profit_loss, admin_note }, { headers: { "Content-Type":"application/json" } });
+        showAlert("success", `Investment #${id} result updated.`);
+        await loadInvestments();
+      } catch (err) {
+        showAlert("error", err?.response?.data?.message || "Failed to update investment result.");
+      }
+    }
+
+    window.settleInvestment = async function(id){
+      const inv = INVESTMENTS.find(x => Number(x.id) === Number(id));
+      if (!inv) return showAlert("warn", "Investment not found.");
+      const finalTotal = Number(inv.final_total || inv.expected_total || 0);
+      const ok = confirm(`Settle investment #${id} and credit $${fmtMoney(finalTotal)} to the user's main wallet?`);
+      if (!ok) return;
+
+      try {
+        await api().post(`/investments/${id}/settle`, {}, { headers: { "Content-Type":"application/json" } });
+        showAlert("success", `Investment #${id} settled.`);
+        await loadInvestments();
+      } catch (err) {
+        showAlert("error", err?.response?.data?.message || "Failed to settle investment.");
       }
     }
 
@@ -742,7 +890,9 @@
     });
 
     btnReload.addEventListener("click", loadPlans);
+    btnReloadInvestments.addEventListener("click", loadInvestments);
     activeOnlyEl.addEventListener("change", () => loadPlans());
+    investmentStatusEl.addEventListener("change", loadInvestments);
     qEl.addEventListener("input", applySearch);
 
     btnExport.addEventListener("click", () => {
@@ -805,6 +955,7 @@
     (function init(){
       if (!requireAuthOrRedirect()) return;
       loadPlans();
+      loadInvestments();
     })();
   </script>
 </body>

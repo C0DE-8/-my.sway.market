@@ -284,12 +284,18 @@ async function migrate() {
       min_amount DECIMAL(24,2) NOT NULL DEFAULT 0.00,
       max_amount DECIMAL(24,2) NULL,
       duration_days INT NOT NULL DEFAULT 1,
-      status VARCHAR(30) NOT NULL DEFAULT 'active',
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+  await addColumn("investment_plans", "description", "TEXT NULL");
+  await addColumn("investment_plans", "roi_percent", "DECIMAL(8,2) NOT NULL DEFAULT 0.00");
+  await addColumn("investment_plans", "accuracy_percent", "DECIMAL(8,2) NOT NULL DEFAULT 0.00");
+  await addColumn("investment_plans", "price", "DECIMAL(24,2) NOT NULL DEFAULT 0.00");
+  await addColumn("investment_plans", "duration_days", "INT NOT NULL DEFAULT 1");
+  await addColumn("investment_plans", "is_active", "TINYINT(1) NOT NULL DEFAULT 1");
 
   await createTable("user_investments", `
     CREATE TABLE IF NOT EXISTS user_investments (
@@ -297,11 +303,18 @@ async function migrate() {
       user_id INT UNSIGNED NOT NULL,
       plan_id INT UNSIGNED NOT NULL,
       amount DECIMAL(24,2) NOT NULL DEFAULT 0.00,
-      status VARCHAR(30) NOT NULL DEFAULT 'active',
+      roi_percent DECIMAL(8,2) NOT NULL DEFAULT 0.00,
       expected_profit DECIMAL(24,2) NOT NULL DEFAULT 0.00,
+      expected_total DECIMAL(24,2) NOT NULL DEFAULT 0.00,
+      duration_days INT NOT NULL DEFAULT 1,
+      actual_profit_loss DECIMAL(24,2) NOT NULL DEFAULT 0.00,
+      final_total DECIMAL(24,2) NOT NULL DEFAULT 0.00,
+      status VARCHAR(30) NOT NULL DEFAULT 'active',
       started_at DATETIME NULL,
       ends_at DATETIME NULL,
       completed_at DATETIME NULL,
+      admin_note TEXT NULL,
+      settled_by INT UNSIGNED NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
@@ -309,6 +322,14 @@ async function migrate() {
       KEY user_investments_plan_idx (plan_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+  await addColumn("user_investments", "roi_percent", "DECIMAL(8,2) NOT NULL DEFAULT 0.00");
+  await addColumn("user_investments", "expected_profit", "DECIMAL(24,2) NOT NULL DEFAULT 0.00");
+  await addColumn("user_investments", "expected_total", "DECIMAL(24,2) NOT NULL DEFAULT 0.00");
+  await addColumn("user_investments", "duration_days", "INT NOT NULL DEFAULT 1");
+  await addColumn("user_investments", "actual_profit_loss", "DECIMAL(24,2) NOT NULL DEFAULT 0.00");
+  await addColumn("user_investments", "final_total", "DECIMAL(24,2) NOT NULL DEFAULT 0.00");
+  await addColumn("user_investments", "admin_note", "TEXT NULL");
+  await addColumn("user_investments", "settled_by", "INT UNSIGNED NULL");
 
   await createTable("user_kyc", `
     CREATE TABLE IF NOT EXISTS user_kyc (
@@ -398,6 +419,27 @@ async function migrate() {
       KEY account_upgrades_status_idx (status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+
+  const plans = [
+    ["Foundation Yield", 8.50, 82.00, 250.00, 7],
+    ["Market Access", 14.00, 86.00, 500.00, 14],
+    ["Growth Strategy", 22.50, 89.00, 1000.00, 21],
+    ["Prime Momentum", 35.00, 92.00, 2500.00, 30],
+    ["Executive Reserve", 55.00, 95.00, 5000.00, 45],
+  ];
+
+  for (const plan of plans) {
+    await run(
+      `
+      INSERT INTO investment_plans
+        (name, roi_percent, accuracy_percent, price, duration_days, is_active, created_at, updated_at)
+      SELECT ?, ?, ?, ?, ?, 1, NOW(), NOW()
+      WHERE NOT EXISTS (SELECT 1 FROM investment_plans WHERE name = ?)
+      `,
+      [...plan, plan[0]]
+    );
+  }
+  console.log("ok seeded investment plans");
 }
 
 migrate()

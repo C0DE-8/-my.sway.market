@@ -1036,7 +1036,7 @@
             </div>
           </div>
 
-          <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[13px]">
+          <div class="mt-4 grid grid-cols-1 sm:grid-cols-4 gap-3 text-[13px]">
             <div class="glass-soft rounded-2xl p-3">
               <div class="t-dim">ROI</div>
               <div class="font-black mt-1">${Number(inv.roi_percent||0)}%</div>
@@ -1045,8 +1045,17 @@
               <div class="t-dim">Ends</div>
               <div class="font-black mt-1">${fmtDate(inv.ends_at)}</div>
             </div>
+            <div class="glass-soft rounded-2xl p-3">
+              <div class="t-dim">Profit / Loss</div>
+              <div class="font-black mt-1">$${fmtMoney(inv.actual_profit_loss)}</div>
+            </div>
+            <div class="glass-soft rounded-2xl p-3">
+              <div class="t-dim">Final Return</div>
+              <div class="font-black mt-1">$${fmtMoney(inv.final_total || inv.expected_total)}</div>
+            </div>
           </div>
 
+          ${inv.admin_note ? `<div class="mt-3 rounded-2xl glass-soft p-3 text-[13px]"><span class="t-dim">Admin note:</span> ${safeStr(inv.admin_note)}</div>` : ""}
           ${inv.completed_at ? `<div class="mt-2 text-[12px] t-dim">Completed: <span class="text-white/90">${fmtDate(inv.completed_at)}</span></div>` : ""}
         `;
         myWrap.appendChild(card);
