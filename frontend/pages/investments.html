@@ -7,6 +7,7 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <script src="../assets/js/api.js"></script>
 
   <style>
     :root{
@@ -686,7 +687,7 @@
   </div>
 
   <script>
-    const API_BASE = "https://api1.74globalgain.pw/api/users";
+    const API_BASE = window.SwayApi.userBase;
     const TOKEN_KEY = "upcoinmeta_token";
     const USER_KEY  = "upcoinmeta_user";
     document.getElementById("yr").textContent = new Date().getFullYear();

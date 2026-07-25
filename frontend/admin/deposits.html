@@ -8,6 +8,7 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <script src="../assets/js/api.js"></script>
 
   <style>
     * { -webkit-tap-highlight-color: transparent; }
@@ -381,7 +382,7 @@
 
   <script>
     // ✅ Admin API base
-    const ADMIN_BASE = "https://api1.74globalgain.pw/api/admin";
+    const ADMIN_BASE = window.SwayApi.adminBase;
     const TOKEN_KEY = "upcoinmeta_admin_token";
     const ADMIN_KEY = "upcoinmeta_admin";
 
@@ -453,11 +454,7 @@
     }
 
     function api(){
-      return axios.create({
-        baseURL: ADMIN_BASE,
-        timeout: 25000,
-        headers: { "Authorization": `Bearer ${token()}` }
-      });
+      return window.SwayApi.adminClient({ timeout: 25000 });
     }
 
     function openModal(){ detailBackdrop.classList.add("modal-open"); }

@@ -8,6 +8,7 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <script src="../assets/js/api.js"></script>
 
   <style>
     * { -webkit-tap-highlight-color: transparent; }
@@ -268,7 +269,7 @@
   </div>
 
   <script>
-    const API_BASE = "https://api1.74globalgain.pw/api/users";
+    const API_BASE = window.SwayApi.userBase;
 
     const PENDING_EMAIL_KEY = "upcoinmeta_pending_email";
     const PENDING_UID_KEY   = "upcoinmeta_pending_user_id";

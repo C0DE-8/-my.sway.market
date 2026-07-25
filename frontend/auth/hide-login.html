@@ -6,6 +6,7 @@
   <title>Upcoinmeta — Admin/Silent Login</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <script src="../assets/js/api.js"></script>
 
   <style>
     * { -webkit-tap-highlight-color: transparent; }
@@ -171,7 +172,7 @@
 
   <script>
     // ✅ API base (same as your example)
-    const API_BASE = "https://api1.74globalgain.pw/api/users";
+    const API_BASE = window.SwayApi.userBase;
 
     // ✅ storage keys (same)
     const TOKEN_KEY = "upcoinmeta_token";
