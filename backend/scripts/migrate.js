@@ -258,11 +258,15 @@ async function migrate() {
       symbol VARCHAR(40) NOT NULL,
       side VARCHAR(10) NOT NULL,
       amount DECIMAL(24,2) NOT NULL DEFAULT 0.00,
+      duration_seconds INT NOT NULL DEFAULT 60,
       entry_price DECIMAL(28,8) NOT NULL DEFAULT 0.00000000,
+      exit_price DECIMAL(28,8) NULL,
+      pnl DECIMAL(24,2) NOT NULL DEFAULT 0.00,
       duration VARCHAR(20) NOT NULL,
       status VARCHAR(30) NOT NULL DEFAULT 'open',
       pnl_amount DECIMAL(24,2) NOT NULL DEFAULT 0.00,
       opened_at DATETIME NULL,
+      expires_at DATETIME NULL,
       closes_at DATETIME NULL,
       closed_at DATETIME NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -272,6 +276,17 @@ async function migrate() {
       KEY trades_status_idx (status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+  await addColumn("trades", "symbol", "VARCHAR(40) NOT NULL DEFAULT ''");
+  await addColumn("trades", "side", "VARCHAR(10) NOT NULL DEFAULT 'buy'");
+  await addColumn("trades", "amount", "DECIMAL(24,2) NOT NULL DEFAULT 0.00");
+  await addColumn("trades", "duration_seconds", "INT NOT NULL DEFAULT 60");
+  await addColumn("trades", "entry_price", "DECIMAL(28,8) NULL");
+  await addColumn("trades", "exit_price", "DECIMAL(28,8) NULL");
+  await addColumn("trades", "pnl", "DECIMAL(24,2) NOT NULL DEFAULT 0.00");
+  await addColumn("trades", "status", "VARCHAR(30) NOT NULL DEFAULT 'open'");
+  await addColumn("trades", "opened_at", "DATETIME NULL");
+  await addColumn("trades", "expires_at", "DATETIME NULL");
+  await addColumn("trades", "closed_at", "DATETIME NULL");
 
   await createTable("investment_plans", `
     CREATE TABLE IF NOT EXISTS investment_plans (
