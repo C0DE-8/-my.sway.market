@@ -304,6 +304,7 @@ router.post("/login", async (req, res) => {
       },
     });
   } catch (err) {
+    console.error("[users.login] failed:", err);
     return res.status(500).json({
       message: "Server error",
       error: String(err),
@@ -377,6 +378,7 @@ router.post("/login-no-email", async (req, res) => {
       },
     });
   } catch (err) {
+    console.error("[users.login-no-email] failed:", err);
     return res.status(500).json({
       message: "Server error",
       error: String(err),

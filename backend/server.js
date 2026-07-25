@@ -11,6 +11,114 @@ const db = require("./db");
 
 const app = express();
 
+const SERVICE_NAME = "Investment Platform API";
+
+function envStatus(name) {
+  const value = process.env[name];
+  return {
+    name,
+    ok: Boolean(value),
+    configured: Boolean(value),
+  };
+}
+
+function errorPayload(error) {
+  return {
+    name: error?.name || "Error",
+    message: error?.message || String(error),
+    code: error?.code || undefined,
+  };
+}
+
+async function runCheck(name, fn) {
+  const started = Date.now();
+  try {
+    const details = await fn();
+    return {
+      name,
+      ok: true,
+      ms: Date.now() - started,
+      ...(details ? { details } : {}),
+    };
+  } catch (error) {
+    return {
+      name,
+      ok: false,
+      ms: Date.now() - started,
+      error: errorPayload(error),
+    };
+  }
+}
+
+async function buildHealthReport() {
+  const checks = [];
+
+  checks.push(await runCheck("gateway.status", async () => db.status()));
+
+  checks.push(await runCheck("database.query", async () => {
+    const [rows] = await db.query("SELECT 1 AS ok");
+    return { rows: rows.length, ok: rows[0]?.ok === 1 };
+  }));
+
+  checks.push(await runCheck("auth.users_login_query", async () => {
+    const [rows] = await db.query(
+      `
+      SELECT
+        id,
+        full_name,
+        username,
+        email,
+        password_hash,
+        role,
+        is_verified
+      FROM users
+      WHERE LOWER(email) = ? OR LOWER(username) = ?
+      LIMIT 1
+      `,
+      ["__health_check__", "__health_check__"]
+    );
+    return { rows: rows.length };
+  }));
+
+  checks.push(await runCheck("auth.admins_login_query", async () => {
+    const [rows] = await db.query(
+      "SELECT id, name, email, password_hash FROM admins WHERE email = ? LIMIT 1",
+      ["__health_check__"]
+    );
+    return { rows: rows.length };
+  }));
+
+  checks.push(await runCheck("auth.jwt_sign", async () => {
+    const jwt = require("jsonwebtoken");
+    jwt.sign({ health: true }, process.env.JWT_SECRET || "dev_secret", { expiresIn: "1m" });
+    return { jwtSecretConfigured: Boolean(process.env.JWT_SECRET) };
+  }));
+
+  const env = [
+    "SITE_ID",
+    "API_KEY",
+    "DBMS_URL",
+    "JWT_SECRET",
+    "ADMIN_REGISTER_SECRET",
+    "SMTP_HOST",
+    "SMTP_USER",
+    "SMTP_PASS",
+  ].map(envStatus);
+
+  const ok = checks.every((check) => check.ok);
+
+  return {
+    ok,
+    service: SERVICE_NAME,
+    time: new Date().toISOString(),
+    environment: {
+      nodeEnv: process.env.NODE_ENV || "development",
+      env,
+    },
+    checks,
+  };
+}
+
 /* =========================================================
    ✅ SECURITY (FIXED FOR IMAGE LOADING)
    ========================================================= */
@@ -55,15 +163,20 @@ app.use(
    ✅ HEALTH CHECK
    ========================================================= */
 app.get("/", (req, res) => {
-  res.json({ ok: true, service: "Investment Platform API" });
+  res.json({ ok: true, service: SERVICE_NAME });
 });
 
-app.get("/health", async (req, res) => {
+app.get(["/health", "/api/health", "/api/debug/health"], async (req, res) => {
   try {
-    const status = await db.status();
-    res.json({ ok: true, service: "Investment Platform API", gateway: status });
+    const report = await buildHealthReport();
+    res.status(report.ok ? 200 : 503).json({ ...report, route: req.path });
   } catch (error) {
-    res.status(503).json({ ok: false, service: "Investment Platform API", error: error.message });
+    res.status(503).json({
+      ok: false,
+      service: SERVICE_NAME,
+      route: req.path,
+      error: errorPayload(error),
+    });
   }
 });
 

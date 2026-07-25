@@ -170,6 +170,7 @@ router.post("/login", async (req, res) => {
     const token = signToken({ id: admin.id, role: "admin", email: admin.email });
     return res.json({ message: "Logged in", token, admin: { id: admin.id, name: admin.name, email: admin.email } });
   } catch (err) {
+    console.error("[admin.login] failed:", err);
     return res.status(500).json({ message: "Server error", error: String(err) });
   }
 });
