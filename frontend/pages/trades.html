@@ -76,7 +76,7 @@
       overflow-x:hidden;
       -webkit-overflow-scrolling:touch;
       padding-top: calc(12px + var(--safe-top));
-      padding-bottom: calc(18px + var(--safe-bottom) + var(--nav-h));
+      padding-bottom: calc(18px + var(--safe-bottom));
       position: relative;
       z-index: 1;
     }
@@ -547,30 +547,6 @@
   </div>
 
   <!-- ✅ Bottom Navbar -->
-  <nav class="mobile-nav" aria-label="Bottom navigation">
-    <div class="mobile-nav-inner">
-      <a class="nav-item" href="../pages/dashboard.html">
-        <span class="nav-ico"><img src="assets/images/bal.svg" alt="Portfolio"></span>
-        <span>Portfolio</span>
-      </a>
-      <a class="nav-item" href="../pages/deposit.html">
-        <span class="nav-ico">+</span>
-        <span>Deposit</span>
-      </a>
-      <a class="nav-item" href="../pages/withdraw.html">
-        <span class="nav-ico">−</span>
-        <span>Withdraw</span>
-      </a>
-      <a class="nav-item active" href="../pages/trades.html">
-        <span class="nav-ico">↗</span>
-        <span>Trades</span>
-      </a>
-      <a class="nav-item" href="../pages/transactions.html">
-        <span class="nav-ico">≡</span>
-        <span>Transactions</span>
-      </a>
-    </div>
-  </nav>
 
   <script>
     const API_BASE = window.SwayApi.userBase;
