@@ -311,59 +311,6 @@
     .kv .v{ font-weight: 900; text-align:right; max-width: 62%; overflow-wrap:anywhere; }
 
     /* ✅ Bottom navbar */
-    .mobile-nav{
-      position: fixed;
-      left: 14px;
-      right: 14px;
-      bottom: calc(12px + var(--safe-bottom));
-      z-index: 60;
-    }
-    .mobile-nav-inner{
-      border-radius: 26px;
-      padding: 10px 10px;
-      background: rgba(12,12,16,.76);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
-      border: 1px solid rgba(255,255,255,.10);
-      box-shadow: 0 18px 60px rgba(0,0,0,.55);
-      display:grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 8px;
-    }
-    .nav-item{
-      border-radius: 20px;
-      padding: 10px 6px;
-      text-decoration:none;
-      color: rgba(255,255,255,.70);
-      font-weight: 900;
-      font-size: 12px;
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      justify-content:center;
-      gap: 7px;
-      border: 1px solid transparent;
-      transition: .18s ease;
-      user-select:none;
-    }
-    .nav-item .nav-ico{
-      width: 38px; height: 38px;
-      border-radius: 999px;
-      display:grid;
-      place-items:center;
-      background: rgba(255,255,255,.06);
-      border: 1px solid rgba(255,255,255,.12);
-      font-size: 16px;
-      font-weight: 900;
-      line-height: 1;
-    }
-    .nav-item .nav-ico img{ width: 18px; height: 18px; opacity: .95; }
-    .nav-item.active{
-      color:#fff;
-      background: var(--active);
-      border-color: var(--activeLine);
-      box-shadow: 0 0 0 1px rgba(56,189,248,.08), 0 18px 70px rgba(56,189,248,.06);
-    }
   </style>
 </head>
 

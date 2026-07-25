@@ -420,6 +420,7 @@ async function migrate() {
       user_id INT UNSIGNED NOT NULL,
       requested_account_type VARCHAR(80) NOT NULL,
       current_account_type VARCHAR(80) NULL,
+      note TEXT NULL,
       status VARCHAR(30) NOT NULL DEFAULT 'pending',
       proof_filename VARCHAR(255) NULL,
       admin_note TEXT NULL,
@@ -434,6 +435,16 @@ async function migrate() {
       KEY account_upgrades_status_idx (status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+  await addColumn("account_upgrades", "requested_account_type", "VARCHAR(80) NOT NULL DEFAULT ''");
+  await addColumn("account_upgrades", "current_account_type", "VARCHAR(80) NULL");
+  await addColumn("account_upgrades", "note", "TEXT NULL");
+  await addColumn("account_upgrades", "proof_filename", "VARCHAR(255) NULL");
+  await addColumn("account_upgrades", "admin_note", "TEXT NULL");
+  await addColumn("account_upgrades", "approved_by", "INT UNSIGNED NULL");
+  await addColumn("account_upgrades", "approved_at", "DATETIME NULL");
+  await addColumn("account_upgrades", "declined_by", "INT UNSIGNED NULL");
+  await addColumn("account_upgrades", "declined_at", "DATETIME NULL");
+  await addColumn("account_upgrades", "updated_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
 
   const plans = [
     ["Foundation Yield", 8.50, 82.00, 250.00, 7],
