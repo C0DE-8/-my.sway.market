@@ -12,6 +12,18 @@ const { upsUpload } = require("../middleware/ups-upload");
 
 const router = express.Router();
 
+function isAbsoluteUrl(value) {
+  return /^https?:\/\//i.test(String(value || ""));
+}
+
+function walletQrFromStoredValue(req, storedValue) {
+  if (!storedValue) return { qr_path: null, qr_url: null };
+  if (isAbsoluteUrl(storedValue)) return { qr_path: null, qr_url: storedValue };
+
+  const qr_path = `/uploads/wallets/${storedValue}`;
+  return { qr_path, qr_url: `${req.protocol}://${req.get("host")}${qr_path}` };
+}
+
 function signToken(payload) {
   return jwt.sign(payload, process.env.JWT_SECRET || "dev_secret", { expiresIn: "7d" });
 }
@@ -735,16 +747,13 @@ router.get("/wallet-addresses", auth, async (req, res) => {
       `
     );
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-
     const wallets = rows.map((w) => {
-      const qr_path = w.qr_filename ? `/uploads/wallets/${w.qr_filename}` : null;
+      const qr = walletQrFromStoredValue(req, w.qr_filename);
       return {
         id: w.id,
         asset: w.asset,
         address: w.address,
-        qr_path,
-        qr_url: qr_path ? `${baseUrl}${qr_path}` : null,
+        ...qr,
         created_at: w.created_at,
         updated_at: w.updated_at,
       };
@@ -778,16 +787,14 @@ router.get("/wallet-addresses/:id", auth, async (req, res) => {
     }
 
     const w = rows[0];
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-    const qr_path = w.qr_filename ? `/uploads/wallets/${w.qr_filename}` : null;
+    const qr = walletQrFromStoredValue(req, w.qr_filename);
 
     return res.json({
       wallet: {
         id: w.id,
         asset: w.asset,
         address: w.address,
-        qr_path,
-        qr_url: qr_path ? `${baseUrl}${qr_path}` : null,
+        ...qr,
         created_at: w.created_at,
         updated_at: w.updated_at,
       },

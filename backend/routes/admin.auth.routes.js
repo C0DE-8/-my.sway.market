@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
+const { v2: cloudinary } = require("cloudinary");
 const pool = require("../db");
 const auth = require("../middleware/auth");
 const adminOnly = require("../middleware/adminOnly");
@@ -104,6 +105,12 @@ const ASSETS = new Set(["BTC", "ETH", "USDT", "BNB", "LTC", "DOGE", "XRP", "SHIB
 const UPLOAD_DIR = path.join(__dirname, "..", "uploads", "wallets");
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
 function safeAsset(v) {
   const a = String(v || "").trim().toUpperCase();
   return ASSETS.has(a) ? a : null;
@@ -118,17 +125,83 @@ function fileUrl(req, relPath) {
   return `${baseUrl(req)}${relPath}`;
 }
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || "").toLowerCase() || ".png";
-    const name = `qr_${Date.now()}_${Math.random().toString(16).slice(2)}${ext}`;
-    cb(null, name);
-  },
-});
+function isAbsoluteUrl(value) {
+  return /^https?:\/\//i.test(String(value || ""));
+}
+
+function walletQrFromStoredValue(req, storedValue) {
+  if (!storedValue) return { qr_path: null, qr_url: null };
+  if (isAbsoluteUrl(storedValue)) return { qr_path: null, qr_url: storedValue };
+
+  const qr_path = `/uploads/wallets/${storedValue}`;
+  return { qr_path, qr_url: fileUrl(req, qr_path) };
+}
+
+function cloudinaryPublicIdFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const marker = "/image/upload/";
+    const markerIndex = parsed.pathname.indexOf(marker);
+    if (markerIndex === -1) return null;
+
+    let publicPath = parsed.pathname.slice(markerIndex + marker.length);
+    publicPath = publicPath.replace(/^v\d+\//, "");
+    publicPath = decodeURIComponent(publicPath);
+
+    const dotIndex = publicPath.lastIndexOf(".");
+    return dotIndex > 0 ? publicPath.slice(0, dotIndex) : publicPath;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function deleteStoredQr(storedValue) {
+  if (!storedValue) return;
+
+  if (isAbsoluteUrl(storedValue)) {
+    const publicId = cloudinaryPublicIdFromUrl(storedValue);
+    if (publicId) {
+      try {
+        await cloudinary.uploader.destroy(publicId, { resource_type: "image" });
+      } catch (error) {
+        console.warn("[wallet-addresses] Cloudinary QR delete failed:", error.message);
+      }
+    }
+    return;
+  }
+
+  const oldPath = path.join(UPLOAD_DIR, storedValue);
+  fs.unlink(oldPath, () => {});
+}
+
+function uploadQrToCloudinary(file, asset) {
+  if (!file) return Promise.resolve(null);
+  if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+    return Promise.reject(new Error("Cloudinary is not configured"));
+  }
+
+  const publicId = `${asset.toLowerCase()}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "sway/wallet-qrs",
+        public_id: publicId,
+        resource_type: "image",
+        overwrite: false,
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result.secure_url);
+      }
+    );
+
+    stream.end(file.buffer);
+  });
+}
 
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 3 * 1024 * 1024 }, // 3MB
   fileFilter: (req, file, cb) => {
     const ok = ["image/png", "image/jpeg", "image/jpg", "image/webp"].includes(file.mimetype);
@@ -600,16 +673,18 @@ router.get("/users/:id/pin", auth, adminOnly, async (req, res) => {
 
 // -------------------------- POST /api/admin/wallet-addresses --------------------------
 router.post("/wallet-addresses", auth, adminOnly, upload.single("qr"), async (req, res) => {
+  let uploadedQrUrl = null;
+
   try {
     const asset = safeAsset(req.body.asset);
     const address = String(req.body.address || "").trim();
 
     if (!asset || !address) {
-      if (req.file) fs.unlink(req.file.path, () => {});
       return res.status(400).json({ message: "asset and address are required" });
     }
 
-    const qr_filename = req.file ? req.file.filename : null;
+    uploadedQrUrl = req.file ? await uploadQrToCloudinary(req.file, asset) : null;
+    const qr_filename = uploadedQrUrl;
 
     // if you set UNIQUE(asset), this will prevent duplicates
     const [r] = await pool.query(
@@ -620,7 +695,7 @@ router.post("/wallet-addresses", auth, adminOnly, upload.single("qr"), async (re
       [asset, address, qr_filename]
     );
 
-    const qr_path = qr_filename ? `/uploads/wallets/${qr_filename}` : null;
+    const qr = walletQrFromStoredValue(req, qr_filename);
 
     return res.json({
       message: "Wallet address created",
@@ -628,13 +703,12 @@ router.post("/wallet-addresses", auth, adminOnly, upload.single("qr"), async (re
         id: r.insertId,
         asset,
         address,
-        qr_path,
-        qr_url: qr_path ? fileUrl(req, qr_path) : null,
+        qr_filename,
+        ...qr,
       },
     });
   } catch (err) {
-    // cleanup file if DB insert fails
-    if (req.file) fs.unlink(req.file.path, () => {});
+    if (uploadedQrUrl) await deleteStoredQr(uploadedQrUrl);
     // duplicate asset (if UNIQUE asset)
     if (String(err).includes("ER_DUP_ENTRY")) {
       return res.status(409).json({ message: "Wallet for this asset already exists" });
@@ -644,10 +718,11 @@ router.post("/wallet-addresses", auth, adminOnly, upload.single("qr"), async (re
 });
 // -------------------------- PUT /api/admin/wallet-addresses/:id --------------------------
 router.put("/wallet-addresses/:id", auth, adminOnly, upload.single("qr"), async (req, res) => {
+  let uploadedQrUrl = null;
+
   try {
     const id = Number(req.params.id);
     if (!id) {
-      if (req.file) fs.unlink(req.file.path, () => {});
       return res.status(400).json({ message: "Invalid id" });
     }
 
@@ -656,7 +731,6 @@ router.put("/wallet-addresses/:id", auth, adminOnly, upload.single("qr"), async 
       [id]
     );
     if (!oldRows.length) {
-      if (req.file) fs.unlink(req.file.path, () => {});
       return res.status(404).json({ message: "Wallet record not found" });
     }
 
@@ -666,7 +740,6 @@ router.put("/wallet-addresses/:id", auth, adminOnly, upload.single("qr"), async 
     if (Object.prototype.hasOwnProperty.call(req.body, "asset")) {
       const asset = safeAsset(req.body.asset);
       if (!asset) {
-        if (req.file) fs.unlink(req.file.path, () => {});
         return res.status(400).json({ message: "Invalid asset" });
       }
       updates.push("asset = ?");
@@ -676,7 +749,6 @@ router.put("/wallet-addresses/:id", auth, adminOnly, upload.single("qr"), async 
     if (Object.prototype.hasOwnProperty.call(req.body, "address")) {
       const address = String(req.body.address || "").trim();
       if (!address) {
-        if (req.file) fs.unlink(req.file.path, () => {});
         return res.status(400).json({ message: "address cannot be empty" });
       }
       updates.push("address = ?");
@@ -685,13 +757,14 @@ router.put("/wallet-addresses/:id", auth, adminOnly, upload.single("qr"), async 
 
     let newQrFilename = null;
     if (req.file) {
-      newQrFilename = req.file.filename;
+      const assetForUpload = safeAsset(req.body.asset) || oldRows[0].asset;
+      uploadedQrUrl = await uploadQrToCloudinary(req.file, assetForUpload);
+      newQrFilename = uploadedQrUrl;
       updates.push("qr_filename = ?");
       vals.push(newQrFilename);
     }
 
     if (!updates.length) {
-      if (req.file) fs.unlink(req.file.path, () => {});
       return res.status(400).json({ message: "No fields to update" });
     }
 
@@ -704,8 +777,7 @@ router.put("/wallet-addresses/:id", auth, adminOnly, upload.single("qr"), async 
 
     // delete old QR if replaced
     if (newQrFilename && oldRows[0].qr_filename) {
-      const oldPath = path.join(UPLOAD_DIR, oldRows[0].qr_filename);
-      fs.unlink(oldPath, () => {});
+      await deleteStoredQr(oldRows[0].qr_filename);
     }
 
     const [rows] = await pool.query(
@@ -714,18 +786,17 @@ router.put("/wallet-addresses/:id", auth, adminOnly, upload.single("qr"), async 
     );
 
     const w = rows[0];
-    const qr_path = w.qr_filename ? `/uploads/wallets/${w.qr_filename}` : null;
+    const qr = walletQrFromStoredValue(req, w.qr_filename);
 
     return res.json({
       message: "Wallet updated",
       wallet: {
         ...w,
-        qr_path,
-        qr_url: qr_path ? fileUrl(req, qr_path) : null,
+        ...qr,
       },
     });
   } catch (err) {
-    if (req.file) fs.unlink(req.file.path, () => {});
+    if (uploadedQrUrl) await deleteStoredQr(uploadedQrUrl);
     if (String(err).includes("ER_DUP_ENTRY")) {
       return res.status(409).json({ message: "Wallet for this asset already exists" });
     }
@@ -740,11 +811,9 @@ router.get("/wallet-addresses", auth, adminOnly, async (req, res) => {
     );
 
     const wallets = rows.map((w) => {
-      const qr_path = w.qr_filename ? `/uploads/wallets/${w.qr_filename}` : null;
       return {
         ...w,
-        qr_path,
-        qr_url: qr_path ? fileUrl(req, qr_path) : null,
+        ...walletQrFromStoredValue(req, w.qr_filename),
       };
     });
 
@@ -766,13 +835,12 @@ router.get("/wallet-addresses/:id", auth, adminOnly, async (req, res) => {
     if (!rows.length) return res.status(404).json({ message: "Wallet record not found" });
 
     const w = rows[0];
-    const qr_path = w.qr_filename ? `/uploads/wallets/${w.qr_filename}` : null;
+    const qr = walletQrFromStoredValue(req, w.qr_filename);
 
     return res.json({
       wallet: {
         ...w,
-        qr_path,
-        qr_url: qr_path ? fileUrl(req, qr_path) : null,
+        ...qr,
       },
     });
   } catch (err) {
@@ -795,8 +863,7 @@ router.delete("/wallet-addresses/:id", auth, adminOnly, async (req, res) => {
 
     // delete file if exists
     if (rows[0].qr_filename) {
-      const p = path.join(UPLOAD_DIR, rows[0].qr_filename);
-      fs.unlink(p, () => {});
+      await deleteStoredQr(rows[0].qr_filename);
     }
 
     return res.json({ message: "Wallet deleted" });

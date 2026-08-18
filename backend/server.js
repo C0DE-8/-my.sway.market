@@ -140,6 +140,9 @@ async function buildHealthReport() {
     "SMTP_HOST",
     "SMTP_USER",
     "SMTP_PASS",
+    "CLOUDINARY_CLOUD_NAME",
+    "CLOUDINARY_API_KEY",
+    "CLOUDINARY_API_SECRET",
   ].map(envStatus);
 
   const ok = checks.every((check) => check.ok);
