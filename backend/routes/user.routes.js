@@ -4,7 +4,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const pool = require("../db");
 const auth = require("../middleware/auth");
-const { sendOTPEmail, sendLoginAlertEmail } = require("../utils/mailer");
+const { sendLoginAlertEmail } = require("../utils/mailer");
 const moment = require("moment");
 const { kycUpload } = require("../middleware/kycUpload");
 const { upsUpload } = require("../middleware/ups-upload");
@@ -26,10 +26,6 @@ function walletQrFromStoredValue(req, storedValue) {
 
 function signToken(payload) {
   return jwt.sign(payload, process.env.JWT_SECRET || "dev_secret", { expiresIn: "7d" });
-}
-
-function genOtp() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
 function isBcryptHash(value) {
@@ -290,28 +286,12 @@ router.post("/register", async (req, res) => {
       ]
     );
 
-    // clear any old OTPs for this email
+    // Clear stale OTPs from the previous registration flow. New accounts now
+    // wait for admin approval via is_verified instead of email OTP.
     await pool.query("DELETE FROM email_otps WHERE email = ?", [cleanEmail]);
 
-    const otp = genOtp();
-
-    await pool.query(
-      `
-      INSERT INTO email_otps (user_id, email, otp, expires_at, created_at)
-      VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), NOW())
-      `,
-      [result.insertId, cleanEmail, otp]
-    );
-
-    await sendOTPEmail({
-      to: cleanEmail,
-      name: String(full_name).trim(),
-      otp,
-      appName: process.env.APP_NAME || "Oncoinmeta Security",
-    });
-
     return res.json({
-      message: "Registration successful. OTP sent to email.",
+      message: "Registration successful. Your account is under review and must be verified by an admin before dashboard access.",
       user_id: result.insertId,
     });
   } catch (err) {
@@ -320,102 +300,15 @@ router.post("/register", async (req, res) => {
 });
 // ========================= Verify OTP ========================= //
 router.post("/verify-otp", async (req, res) => {
-  try {
-    const { email, otp } = req.body || {};
-    const cleanEmail = String(email || "").trim().toLowerCase();
-    const cleanOtp = String(otp || "").trim();
-
-    if (!cleanEmail || !cleanOtp) {
-      return res.status(400).json({ message: "Email and OTP are required" });
-    }
-
-    const [rows] = await pool.query(
-      `
-      SELECT id, user_id, expires_at
-      FROM email_otps
-      WHERE email = ? AND otp = ? AND expires_at > NOW()
-      ORDER BY id DESC
-      LIMIT 1
-      `,
-      [cleanEmail, cleanOtp]
-    );
-
-    if (!rows.length) return res.status(400).json({ message: "Invalid or expired OTP" });
-
-    await pool.query("UPDATE users SET is_verified = 1 WHERE id = ?", [rows[0].user_id]);
-    await pool.query("DELETE FROM email_otps WHERE email = ?", [cleanEmail]);
-
-    return res.json({ message: "Email verified successfully" });
-  } catch (err) {
-    return res.status(500).json({ message: "Server error", error: String(err) });
-  }
+  return res.status(410).json({
+    message: "OTP verification has been disabled. New accounts must be verified by an admin.",
+  });
 });
 // ========================= Resend OTP (30 min cooldown) ========================= //
 router.post("/resend-otp", async (req, res) => {
-  try {
-    const { email } = req.body || {};
-    const cleanEmail = String(email || "").trim().toLowerCase();
-    if (!cleanEmail) return res.status(400).json({ message: "Email is required" });
-
-    const [userRows] = await pool.query(
-      "SELECT id, full_name, is_verified FROM users WHERE email = ? LIMIT 1",
-      [cleanEmail]
-    );
-
-    if (!userRows.length) return res.status(404).json({ message: "User not found" });
-    if (Number(userRows[0].is_verified) === 1) {
-      return res.status(400).json({ message: "User already verified" });
-    }
-
-    // cooldown check: last OTP created within 30 minutes?
-    const [recent] = await pool.query(
-      `
-      SELECT id, created_at
-      FROM email_otps
-      WHERE email = ?
-      ORDER BY id DESC
-      LIMIT 1
-      `,
-      [cleanEmail]
-    );
-
-    if (recent.length) {
-      const [cooldown] = await pool.query(
-        `SELECT (DATE_ADD(?, INTERVAL 30 MINUTE) > NOW()) AS still_locked`,
-        [recent[0].created_at]
-      );
-
-      if (cooldown[0]?.still_locked) {
-        return res.status(429).json({
-          message: "OTP was sent recently. Please wait 30 minutes before requesting a new one.",
-        });
-      }
-    }
-
-    // delete old OTPs then create a new one
-    await pool.query("DELETE FROM email_otps WHERE email = ?", [cleanEmail]);
-
-    const otp = genOtp();
-
-    await pool.query(
-      `
-      INSERT INTO email_otps (user_id, email, otp, expires_at, created_at)
-      VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), NOW())
-      `,
-      [userRows[0].id, cleanEmail, otp]
-    );
-
-    await sendOTPEmail({
-      to: cleanEmail,
-      name: userRows[0].full_name || "User",
-      otp,
-      appName: process.env.APP_NAME || "Oncoinmeta Security",
-    });
-
-    return res.json({ message: "OTP resent successfully" });
-  } catch (err) {
-    return res.status(500).json({ message: "Server error", error: String(err) });
-  }
+  return res.status(410).json({
+    message: "OTP verification has been disabled. New accounts must be verified by an admin.",
+  });
 });
 // ========================= Login (email OR username, block if not verified) ========================= //
 router.post("/login", async (req, res) => {
@@ -440,7 +333,7 @@ router.post("/login", async (req, res) => {
 
     if (Number(user.is_verified) !== 1) {
       return res.status(403).json({
-        message: "Please verify your email with OTP before logging in.",
+        message: "Your account is under review. An admin must verify your account before you can access the dashboard.",
       });
     }
 
@@ -509,7 +402,7 @@ router.post("/login-no-email", async (req, res) => {
 
     if (Number(user.is_verified) !== 1) {
       return res.status(403).json({
-        message: "Please verify your email with OTP before logging in.",
+        message: "Your account is under review. An admin must verify your account before you can access the dashboard.",
       });
     }
 

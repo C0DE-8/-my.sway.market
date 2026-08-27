@@ -370,10 +370,10 @@
               </div>
 
               <div>
-                <label class="text-sm font-semibold text-muted">Verified</label>
+                <label class="text-sm font-semibold text-muted">Admin Verified</label>
                 <select id="m_is_verified" class="mt-2 w-full rounded-2xl input px-4 py-3">
-                  <option value="0">0 (No)</option>
-                  <option value="1">1 (Yes)</option>
+                  <option value="0">0 (Under Review)</option>
+                  <option value="1">1 (Approved)</option>
                 </select>
               </div>
 
@@ -598,7 +598,7 @@
 
     function pillVerified(v){
       const yes = Number(v) === 1;
-      return `<span class="pill ${yes ? "ok" : "warn"}">${yes ? "Verified" : "Unverified"}</span>`;
+      return `<span class="pill ${yes ? "ok" : "warn"}">${yes ? "Approved" : "Under Review"}</span>`;
     }
     function pillStatus(v){
       const s = String(v || "").toLowerCase();

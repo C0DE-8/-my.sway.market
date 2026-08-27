@@ -182,7 +182,7 @@
         </a>
 
         <p class="text-[12px] text-white/55 leading-relaxed">
-          Access is restricted to verified accounts. If your email isn’t verified, you’ll be redirected to OTP verification.
+          Access is restricted to admin-verified accounts. New accounts remain under review until an admin approves them.
         </p>
       </form>
 
@@ -207,6 +207,11 @@
     const togglePass = document.getElementById("togglePass");
 
     document.getElementById("yr").textContent = new Date().getFullYear();
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("review") === "pending") {
+      showAlert("success", "Registration successful. Your account is under review and must be verified by an admin before dashboard access.");
+    }
 
     function showAlert(type, msg) {
       alertBox.classList.remove("hidden");
@@ -290,12 +295,9 @@
         const msg = err?.response?.data?.message || "Login failed. Please try again.";
         const detail = err?.response?.data?.error;
 
-        // 403 -> not verified
+        // 403 -> not approved by admin
         if (status === 403) {
-          showAlert("warn", msg + " Redirecting to OTP verification...");
-          setTimeout(() => {
-            window.location.href = "../auth/verify.html";
-          }, 1200);
+          showAlert("warn", msg);
         } else if (status === 401) {
           showAlert("error", "Invalid email/username or password.");
         } else if (status === 500 && detail) {

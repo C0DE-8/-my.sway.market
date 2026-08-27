@@ -159,7 +159,7 @@
         </button>
 
         <p class="text-[12px] text-white/55 leading-relaxed">
-          Verified accounts only. If not verified, you’ll be redirected to OTP verification.
+          Admin-verified accounts only. New accounts remain under review until an admin approves them.
         </p>
       </form>
 
@@ -266,8 +266,7 @@
         const msg = err?.response?.data?.message || "Login failed. Please try again.";
 
         if (status === 403) {
-          showAlert("warn", msg + " Redirecting to OTP verification...");
-          setTimeout(() => window.location.href = "../auth/verify.html", 1200);
+          showAlert("warn", msg);
         } else if (status === 401) {
           showAlert("error", "Invalid email/username or password.");
         } else {
