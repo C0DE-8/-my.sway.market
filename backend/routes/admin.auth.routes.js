@@ -68,6 +68,21 @@ function makeUsername(email) {
   return `${base}${Date.now().toString(36)}`.slice(0, 50);
 }
 
+async function deleteRowsByUserId(table, userId) {
+  try {
+    await pool.query(`DELETE FROM ${table} WHERE user_id = ?`, [userId]);
+  } catch (error) {
+    if (!String(error.message || "").includes("doesn't exist")) throw error;
+  }
+}
+
+function looksLikeForeignKeyError(error) {
+  const message = String(error.message || "");
+  return error.code === "ER_ROW_IS_REFERENCED_2" ||
+    message.includes("foreign key constraint fails") ||
+    message.includes("Cannot delete or update a parent row");
+}
+
 function signToken(payload) {
   return jwt.sign(payload, process.env.JWT_SECRET || "dev_secret", {
     expiresIn: "7d",
@@ -548,6 +563,90 @@ router.put("/users/:id", auth, adminOnly, async (req, res) => {
       user: { ...userRows[0], crypto_balances },
     });
   } catch (err) {
+    return res.status(500).json({ message: "Server error", error: String(err) });
+  }
+});
+
+// -------------------------- DELETE /api/admin/users/:id -------------------------- //
+router.delete("/users/:id", auth, adminOnly, async (req, res) => {
+  const userId = Number(req.params.id);
+
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ message: "Invalid user id" });
+  }
+
+  if (Number(req.user.id) === userId) {
+    return res.status(400).json({ message: "You cannot delete your own admin account" });
+  }
+
+  try {
+    const [users] = await pool.query(
+      "SELECT id, email, role, isAdmin FROM users WHERE id = ? LIMIT 1",
+      [userId]
+    );
+
+    if (!users.length) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const user = users[0];
+    if (String(user.role || "").toLowerCase() === "admin" || Number(user.isAdmin) === 1) {
+      return res.status(400).json({ message: "Admin accounts cannot be deleted from user management" });
+    }
+
+    let result;
+    try {
+      [result] = await pool.query("DELETE FROM users WHERE id = ?", [userId]);
+    } catch (error) {
+      if (!looksLikeForeignKeyError(error)) throw error;
+
+      const requiredChildTables = [
+        "balance_conversions",
+        "blocked_actions",
+        "login_otps",
+        "otp_bypass",
+        "simple_trades",
+        "user_activity",
+        "user_copy_trades",
+        "user_deposits",
+        "user_withdrawals",
+        "wallets",
+      ];
+
+      for (const table of requiredChildTables) {
+        await deleteRowsByUserId(table, userId);
+      }
+
+      [result] = await pool.query("DELETE FROM users WHERE id = ?", [userId]);
+    }
+
+    const optionalChildTables = [
+      "account_upgrades",
+      "deposits",
+      "email_logs",
+      "email_otps",
+      "notifications",
+      "trades",
+      "user_crypto_balances",
+      "user_investments",
+      "user_kyc",
+      "withdrawals",
+    ];
+
+    Promise.all(optionalChildTables.map((table) => deleteRowsByUserId(table, userId).catch((error) => {
+      console.warn(`[admin.delete-user] background cleanup skipped ${table}:`, error.message);
+    }))).catch((error) => {
+      console.warn("[admin.delete-user] background cleanup failed:", error.message);
+    });
+
+    return res.json({
+      message: "User deleted",
+      user_id: userId,
+      email: user.email,
+      deleted: result.affectedRows || 0,
+    });
+  } catch (err) {
+    console.error("[admin.delete-user] failed:", err);
     return res.status(500).json({ message: "Server error", error: String(err) });
   }
 });

@@ -91,6 +91,10 @@
     .btn-ghost:hover{ background: rgba(255,255,255,0.08); }
     .btn-ghost:active{ transform: scale(0.99); }
 
+    .btn-danger{ background: rgba(239,68,68,0.16); border: 1px solid rgba(239,68,68,0.34); color: rgba(254,202,202,0.98); }
+    .btn-danger:hover{ background: rgba(239,68,68,0.24); }
+    .btn-danger:active{ transform: scale(0.99); }
+
     .input{ background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.10); outline: none; }
     .input:focus{ box-shadow: 0 0 0 3px rgba(56,189,248,0.22); border-color: rgba(56,189,248,0.28); }
 
@@ -309,6 +313,7 @@
             <button id="btnViewPin" class="rounded-2xl btn-ghost px-4 py-3 font-extrabold">View PIN</button>
             <button id="btnSetPin" class="rounded-2xl btn-ghost px-4 py-3 font-extrabold">Set PIN</button>
             <button id="btnBootstrapUser" class="rounded-2xl btn-ghost px-4 py-3 font-extrabold">Bootstrap Crypto</button>
+            <button id="btnDeleteUser" class="rounded-2xl btn-danger px-4 py-3 font-extrabold">Delete User</button>
             <button id="btnCloseManage" class="rounded-2xl btn-ghost px-4 py-3 font-extrabold">Close</button>
           </div>
         </div>
@@ -544,6 +549,7 @@
     const cryptoGrid = document.getElementById("cryptoGrid");
 
     const btnBootstrapUser = document.getElementById("btnBootstrapUser");
+    const btnDeleteUser = document.getElementById("btnDeleteUser");
     const btnViewPin = document.getElementById("btnViewPin");
     const btnSetPin = document.getElementById("btnSetPin");
 
@@ -867,6 +873,27 @@
       }
     }
 
+    async function deleteActiveUser(){
+      if (!ACTIVE_USER_ID) return;
+
+      const label = manageSubtitle.textContent || `User ID ${ACTIVE_USER_ID}`;
+      const ok = window.confirm(`Delete ${label}? This will permanently remove this user and related records.`);
+      if (!ok) return;
+
+      btnDeleteUser.disabled = true; btnDeleteUser.classList.add("opacity-70");
+      try {
+        const res = await api().delete(`/users/${ACTIVE_USER_ID}`);
+        showAlert("success", res.data?.message || "User deleted.");
+        closeModal(manageBackdrop);
+        ACTIVE_USER_ID = null;
+        await loadUsers();
+      } catch (err) {
+        showAlert("error", err?.response?.data?.message || "Delete failed.");
+      } finally {
+        btnDeleteUser.disabled = false; btnDeleteUser.classList.remove("opacity-70");
+      }
+    }
+
     function openPinModal(mode){
       if (!ACTIVE_USER_ID) return;
       pinValue.textContent = "—";
@@ -963,6 +990,7 @@
     btnZeroCrypto.addEventListener("click", setAllCryptoZero);
 
     btnBootstrapUser.addEventListener("click", bootstrapUserCrypto);
+    btnDeleteUser.addEventListener("click", deleteActiveUser);
 
     btnViewPin.addEventListener("click", viewPin);
     btnSetPin.addEventListener("click", setPin);
