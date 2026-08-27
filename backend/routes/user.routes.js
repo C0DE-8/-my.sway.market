@@ -2,6 +2,7 @@
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const pool = require("../db");
 const auth = require("../middleware/auth");
 const { sendLoginAlertEmail } = require("../utils/mailer");
@@ -11,6 +12,31 @@ const { upsUpload } = require("../middleware/ups-upload");
 
 
 const router = express.Router();
+let cachedUserColumns = null;
+
+async function getUserColumns() {
+  if (cachedUserColumns) return cachedUserColumns;
+
+  const [rows] = await pool.query("DESCRIBE users");
+  cachedUserColumns = new Set(rows.map((row) => row.Field));
+  return cachedUserColumns;
+}
+
+function addIfColumn(columns, data, name, value) {
+  if (columns.has(name)) data[name] = value;
+}
+
+function makeProfileId() {
+  return `SWY-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+}
+
+async function deleteStaleEmailOtps(email) {
+  try {
+    await pool.query("DELETE FROM email_otps WHERE email = ?", [email]);
+  } catch (error) {
+    if (!String(error.message || "").includes("doesn't exist")) throw error;
+  }
+}
 
 function isAbsoluteUrl(value) {
   return /^https?:\/\//i.test(String(value || ""));
@@ -257,44 +283,75 @@ router.post("/register", async (req, res) => {
     } = req.body || {};
 
     const cleanEmail = String(email || "").trim().toLowerCase();
+    const cleanUsername = String(username || "").trim();
 
-    if (!full_name || !username || !address || !city || !country || !phone || !cleanEmail || !password) {
+    if (!full_name || !cleanUsername || !address || !city || !country || !phone || !cleanEmail || !password) {
       return res.status(400).json({ message: "All required fields must be filled" });
     }
 
-    const [exists] = await pool.query("SELECT id FROM users WHERE email = ? LIMIT 1", [cleanEmail]);
-    if (exists.length) return res.status(409).json({ message: "Email already registered" });
+    const [exists] = await pool.query(
+      "SELECT id, email, username FROM users WHERE LOWER(email) = ? OR LOWER(username) = ? LIMIT 1",
+      [cleanEmail, cleanUsername.toLowerCase()]
+    );
+    if (exists.length) {
+      const existing = exists[0];
+      const existingEmail = String(existing.email || "").toLowerCase();
+      return res.status(409).json({
+        message: existingEmail === cleanEmail ? "Email already registered" : "Username already registered",
+      });
+    }
 
     const hash = await bcrypt.hash(String(password), 12);
+    const columns = await getUserColumns();
+    const userData = {};
+    const displayName = String(full_name).trim();
+    const cleanAddress = String(address).trim();
+    const cleanCity = String(city).trim();
+    const cleanCountry = String(country).trim();
+    const cleanPhone = String(phone).trim();
+    const cleanZipcode = zipcode ? String(zipcode).trim() : null;
+
+    addIfColumn(columns, userData, "profile_id", makeProfileId());
+    addIfColumn(columns, userData, "full_name", displayName);
+    addIfColumn(columns, userData, "name", displayName);
+    addIfColumn(columns, userData, "username", cleanUsername);
+    addIfColumn(columns, userData, "address", cleanAddress);
+    addIfColumn(columns, userData, "city", cleanCity);
+    addIfColumn(columns, userData, "zipcode", cleanZipcode);
+    addIfColumn(columns, userData, "country", cleanCountry);
+    addIfColumn(columns, userData, "nationality", cleanCountry);
+    addIfColumn(columns, userData, "phone", cleanPhone);
+    addIfColumn(columns, userData, "phone_number", cleanPhone);
+    addIfColumn(columns, userData, "email", cleanEmail);
+    addIfColumn(columns, userData, "password_hash", hash);
+    addIfColumn(columns, userData, "password", hash);
+    addIfColumn(columns, userData, "role", "user");
+    addIfColumn(columns, userData, "isAdmin", 0);
+    addIfColumn(columns, userData, "is_verified", 0);
+    addIfColumn(columns, userData, "occupation", "N/A");
+    addIfColumn(columns, userData, "date_of_birth", "1970-01-01");
+    addIfColumn(columns, userData, "account_type", "individual");
+    addIfColumn(columns, userData, "base_currency", "USD");
+
+    const insertColumns = Object.keys(userData);
+    const placeholders = insertColumns.map(() => "?").join(", ");
+    const values = insertColumns.map((column) => userData[column]);
 
     const [result] = await pool.query(
-      `
-      INSERT INTO users
-      (full_name, username, address, city, zipcode, country, phone, email, password_hash, role, is_verified, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'user', 0, NOW())
-      `,
-      [
-        String(full_name).trim(),
-        String(username).trim(),
-        String(address).trim(),
-        String(city).trim(),
-        zipcode ? String(zipcode).trim() : null,
-        String(country).trim(),
-        String(phone).trim(),
-        cleanEmail,
-        hash,
-      ]
+      `INSERT INTO users (${insertColumns.join(", ")}) VALUES (${placeholders})`,
+      values
     );
 
     // Clear stale OTPs from the previous registration flow. New accounts now
     // wait for admin approval via is_verified instead of email OTP.
-    await pool.query("DELETE FROM email_otps WHERE email = ?", [cleanEmail]);
+    await deleteStaleEmailOtps(cleanEmail);
 
     return res.json({
       message: "Registration successful. Your account is under review and must be approved before dashboard access.",
       user_id: result.insertId,
     });
   } catch (err) {
+    console.error("[users.register] failed:", err);
     return res.status(500).json({ message: "Server error", error: String(err) });
   }
 });
