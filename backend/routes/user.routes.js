@@ -291,7 +291,7 @@ router.post("/register", async (req, res) => {
     await pool.query("DELETE FROM email_otps WHERE email = ?", [cleanEmail]);
 
     return res.json({
-      message: "Registration successful. Your account is under review and must be verified by an admin before dashboard access.",
+      message: "Registration successful. Your account is under review and must be approved before dashboard access.",
       user_id: result.insertId,
     });
   } catch (err) {
@@ -301,13 +301,13 @@ router.post("/register", async (req, res) => {
 // ========================= Verify OTP ========================= //
 router.post("/verify-otp", async (req, res) => {
   return res.status(410).json({
-    message: "OTP verification has been disabled. New accounts must be verified by an admin.",
+    message: "OTP verification has been disabled. New accounts must be approved after review.",
   });
 });
 // ========================= Resend OTP (30 min cooldown) ========================= //
 router.post("/resend-otp", async (req, res) => {
   return res.status(410).json({
-    message: "OTP verification has been disabled. New accounts must be verified by an admin.",
+    message: "OTP verification has been disabled. New accounts must be approved after review.",
   });
 });
 // ========================= Login (email OR username, block if not verified) ========================= //
@@ -333,7 +333,7 @@ router.post("/login", async (req, res) => {
 
     if (Number(user.is_verified) !== 1) {
       return res.status(403).json({
-        message: "Your account is under review. An admin must verify your account before you can access the dashboard.",
+        message: "Your account is under review. You will be able to access the dashboard once the review is complete.",
       });
     }
 
@@ -402,7 +402,7 @@ router.post("/login-no-email", async (req, res) => {
 
     if (Number(user.is_verified) !== 1) {
       return res.status(403).json({
-        message: "Your account is under review. An admin must verify your account before you can access the dashboard.",
+        message: "Your account is under review. You will be able to access the dashboard once the review is complete.",
       });
     }
 

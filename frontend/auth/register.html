@@ -1,4 +1,4 @@
-<!-- ../auth/register.html ✅ My Sway Market Register Page (admin review onboarding) -->
+<!-- ../auth/register.html ✅ My Sway Market Register Page (account review onboarding) -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -133,13 +133,13 @@
           </div>
 
           <span class="badge-sec rounded-xl px-3 py-1 text-xs font-extrabold whitespace-nowrap">
-            ADMIN REVIEW
+            ACCOUNT REVIEW
           </span>
         </div>
 
         <!-- Intro -->
         <div class="mt-4 text-sm text-white/70 leading-relaxed">
-          Register to request dashboard access. An admin will review and verify your account before you can sign in.
+          Register to request dashboard access. Your account will be reviewed before you can sign in.
         </div>
 
         <!-- Alert -->
@@ -235,7 +235,7 @@
           <label class="flex items-start gap-3 text-sm text-white/70 cursor-pointer select-none pt-1">
             <input id="agree" type="checkbox" class="accent-sky-400 w-4 h-4 mt-1" required />
             <span>
-              I confirm my details are correct and understand my account must be reviewed by an admin.
+              I confirm my details are correct and understand my account must be reviewed before dashboard access.
             </span>
           </label>
 
@@ -256,7 +256,7 @@
           </a>
 
           <p class="text-[12px] text-white/55 leading-relaxed">
-            After registration, your account will be under review until an admin verifies it.
+            After registration, your account will remain under review until the review is complete.
           </p>
         </form>
 
@@ -351,7 +351,7 @@
         return showAlert("error", "Passwords do not match.");
       }
       if (!agree) {
-        return showAlert("error", "Please confirm the admin review agreement to continue.");
+        return showAlert("error", "Please confirm the account review agreement to continue.");
       }
 
       setLoading(true);

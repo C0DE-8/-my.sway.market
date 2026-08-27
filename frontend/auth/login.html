@@ -182,7 +182,7 @@
         </a>
 
         <p class="text-[12px] text-white/55 leading-relaxed">
-          Access is restricted to admin-verified accounts. New accounts remain under review until an admin approves them.
+          Access is restricted to approved accounts. New accounts remain under review until the review is complete.
         </p>
       </form>
 
@@ -210,7 +210,7 @@
 
     const params = new URLSearchParams(window.location.search);
     if (params.get("review") === "pending") {
-      showAlert("success", "Registration successful. Your account is under review and must be verified by an admin before dashboard access.");
+      showAlert("success", "Registration successful. Your account is under review. You will be able to access the dashboard once the review is complete.");
     }
 
     function showAlert(type, msg) {
@@ -295,7 +295,7 @@
         const msg = err?.response?.data?.message || "Login failed. Please try again.";
         const detail = err?.response?.data?.error;
 
-        // 403 -> not approved by admin
+        // 403 -> account review pending
         if (status === 403) {
           showAlert("warn", msg);
         } else if (status === 401) {
