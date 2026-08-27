@@ -1,4 +1,4 @@
-<!-- ../auth/signup.html ✅ My Sway Market Register Page (account review onboarding) -->
+<!-- ../auth/signup.html ✅ My Sway Market Register Page (terms onboarding) -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -133,13 +133,13 @@
           </div>
 
           <span class="badge-sec rounded-xl px-3 py-1 text-xs font-extrabold whitespace-nowrap">
-            ACCOUNT REVIEW
+            TERMS REQUIRED
           </span>
         </div>
 
         <!-- Intro -->
         <div class="mt-4 text-sm text-white/70 leading-relaxed">
-          Register to request dashboard access. Your account will be reviewed before you can sign in.
+          Create your account after confirming the terms and policies.
         </div>
 
         <!-- Alert -->
@@ -235,7 +235,7 @@
           <label class="flex items-start gap-3 text-sm text-white/70 cursor-pointer select-none pt-1">
             <input id="agree" type="checkbox" class="accent-sky-400 w-4 h-4 mt-1" required />
             <span>
-              I confirm my details are correct and understand my account must be reviewed before dashboard access.
+              I confirm my details are correct and agree to the terms and policies.
             </span>
           </label>
 
@@ -256,7 +256,7 @@
           </a>
 
           <p class="text-[12px] text-white/55 leading-relaxed">
-            After registration, your account will remain under review until the review is complete.
+            After registration, you can sign in with your email or username.
           </p>
         </form>
 
@@ -351,7 +351,7 @@
         return showAlert("error", "Passwords do not match.");
       }
       if (!agree) {
-        return showAlert("error", "Please confirm the account review agreement to continue.");
+        return showAlert("error", "Please confirm the terms and policies to continue.");
       }
 
       setLoading(true);
@@ -374,10 +374,10 @@
 
         const data = res.data || {};
 
-        showAlert("success", data.message || "Registration successful. Your account is under review. Redirecting to login...");
+        showAlert("success", data.message || "Registration successful. Redirecting to login...");
 
         setTimeout(() => {
-          window.location.href = "../auth/login.html?review=pending";
+          window.location.href = "../auth/login.html";
         }, 1200);
       } catch (err) {
         const status = err?.response?.status;

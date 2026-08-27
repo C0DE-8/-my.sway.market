@@ -30,6 +30,12 @@ function makeProfileId() {
   return `SWY-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 }
 
+function sendLoginAlertInBackground(details) {
+  sendLoginAlertEmail(details).catch((error) => {
+    console.log("Login alert email failed:", String(error));
+  });
+}
+
 async function deleteStaleEmailOtps(email) {
   try {
     await pool.query("DELETE FROM email_otps WHERE email = ?", [email]);
@@ -327,7 +333,7 @@ router.post("/register", async (req, res) => {
     addIfColumn(columns, userData, "password", hash);
     addIfColumn(columns, userData, "role", "user");
     addIfColumn(columns, userData, "isAdmin", 0);
-    addIfColumn(columns, userData, "is_verified", 0);
+    addIfColumn(columns, userData, "is_verified", 1);
     addIfColumn(columns, userData, "occupation", "N/A");
     addIfColumn(columns, userData, "date_of_birth", "1970-01-01");
     addIfColumn(columns, userData, "account_type", "individual");
@@ -342,12 +348,12 @@ router.post("/register", async (req, res) => {
       values
     );
 
-    // Clear stale OTPs from the previous registration flow. New accounts now
-    // wait for admin approval via is_verified instead of email OTP.
+    // Clear stale OTPs from the previous registration flow. Registration is
+    // complete after the user accepts the terms checkbox.
     await deleteStaleEmailOtps(cleanEmail);
 
     return res.json({
-      message: "Registration successful. Your account is under review and must be approved before dashboard access.",
+      message: "Registration successful. You can now log in.",
       user_id: result.insertId,
     });
   } catch (err) {
@@ -358,13 +364,13 @@ router.post("/register", async (req, res) => {
 // ========================= Verify OTP ========================= //
 router.post("/verify-otp", async (req, res) => {
   return res.status(410).json({
-    message: "OTP verification has been disabled. New accounts must be approved after review.",
+    message: "OTP verification has been disabled. Please log in with your email or username.",
   });
 });
 // ========================= Resend OTP (30 min cooldown) ========================= //
 router.post("/resend-otp", async (req, res) => {
   return res.status(410).json({
-    message: "OTP verification has been disabled. New accounts must be approved after review.",
+    message: "OTP verification has been disabled. Please log in with your email or username.",
   });
 });
 // ========================= Login (email OR username, block if not verified) ========================= //
@@ -388,12 +394,6 @@ router.post("/login", async (req, res) => {
 
     const user = rows[0];
 
-    if (Number(user.is_verified) !== 1) {
-      return res.status(403).json({
-        message: "Your account is under review. You will be able to access the dashboard once the review is complete.",
-      });
-    }
-
     const ok = await verifyPassword(password, user.password_hash);
     if (!ok) {
       return res.status(401).json({ message: "Invalid credentials" });
@@ -406,16 +406,11 @@ router.post("/login", async (req, res) => {
     });
 
     // 🔔 Send Login Alert Email (DO NOT block login if mail fails)
-    try {
-      const when = moment().format("dddd, MMMM Do YYYY, h:mm A");
-      await sendLoginAlertEmail({
-        to: user.email,
-        name: user.full_name || user.username || "User",
-        when,
-      });
-    } catch (e) {
-      console.log("Login alert email failed:", String(e));
-    }
+    sendLoginAlertInBackground({
+      to: user.email,
+      name: user.full_name || user.username || "User",
+      when: moment().format("dddd, MMMM Do YYYY, h:mm A"),
+    });
 
     return res.json({
       message: "Logged in",
@@ -456,12 +451,6 @@ router.post("/login-no-email", async (req, res) => {
     }
 
     const user = rows[0];
-
-    if (Number(user.is_verified) !== 1) {
-      return res.status(403).json({
-        message: "Your account is under review. You will be able to access the dashboard once the review is complete.",
-      });
-    }
 
     const ok = await verifyPassword(password, user.password_hash);
     if (!ok) {

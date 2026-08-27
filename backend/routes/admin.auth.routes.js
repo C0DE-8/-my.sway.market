@@ -2,6 +2,7 @@
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const nodeCrypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
@@ -41,6 +42,31 @@ function adminEmailTemplate({ subject, message }) {
 }
 
 const router = express.Router();
+let cachedUserColumns = null;
+
+async function getUserColumns() {
+  if (cachedUserColumns) return cachedUserColumns;
+
+  const [rows] = await pool.query("DESCRIBE users");
+  cachedUserColumns = new Set(rows.map((row) => row.Field));
+  return cachedUserColumns;
+}
+
+function addIfColumn(columns, data, name, value) {
+  if (columns.has(name)) data[name] = value;
+}
+
+function makeProfileId() {
+  return `SWY-${Date.now().toString(36).toUpperCase()}-${nodeCrypto.randomBytes(3).toString("hex").toUpperCase()}`;
+}
+
+function makeUsername(email) {
+  const base = String(email || "")
+    .split("@")[0]
+    .replace(/[^a-z0-9_]/gi, "")
+    .slice(0, 32) || "user";
+  return `${base}${Date.now().toString(36)}`.slice(0, 50);
+}
 
 function signToken(payload) {
   return jwt.sign(payload, process.env.JWT_SECRET || "dev_secret", {
@@ -2803,7 +2829,7 @@ router.get("/account-upgrades", auth, adminOnly, async (req, res) => {
 // -------------------------- Create User (admin only) ------------------------ //
 router.post("/create-user", auth, adminOnly, async (req, res) => {
   try {
-    const { name, email, password } = req.body || {};
+    const { name, email, password, username } = req.body || {};
     const cleanEmail = String(email || "").trim().toLowerCase();
 
     if (!name || !cleanEmail || !password) {
@@ -2814,11 +2840,40 @@ router.post("/create-user", auth, adminOnly, async (req, res) => {
     if (exists.length) return res.status(409).json({ message: "User already exists" });
 
     const hash = await bcrypt.hash(password, 12);
+    const columns = await getUserColumns();
+    const userData = {};
+    const displayName = String(name).trim();
+    const cleanUsername = username ? String(username).trim() : makeUsername(cleanEmail);
+
+    addIfColumn(columns, userData, "profile_id", makeProfileId());
+    addIfColumn(columns, userData, "full_name", displayName);
+    addIfColumn(columns, userData, "name", displayName);
+    addIfColumn(columns, userData, "username", cleanUsername);
+    addIfColumn(columns, userData, "address", "N/A");
+    addIfColumn(columns, userData, "city", null);
+    addIfColumn(columns, userData, "zipcode", null);
+    addIfColumn(columns, userData, "country", "N/A");
+    addIfColumn(columns, userData, "nationality", "N/A");
+    addIfColumn(columns, userData, "phone", "N/A");
+    addIfColumn(columns, userData, "phone_number", "N/A");
+    addIfColumn(columns, userData, "email", cleanEmail);
+    addIfColumn(columns, userData, "password_hash", hash);
+    addIfColumn(columns, userData, "password", hash);
+    addIfColumn(columns, userData, "role", "user");
+    addIfColumn(columns, userData, "isAdmin", 0);
+    addIfColumn(columns, userData, "is_verified", 1);
+    addIfColumn(columns, userData, "occupation", "N/A");
+    addIfColumn(columns, userData, "date_of_birth", "1970-01-01");
+    addIfColumn(columns, userData, "account_type", "individual");
+    addIfColumn(columns, userData, "base_currency", "USD");
+
+    const insertColumns = Object.keys(userData);
+    const placeholders = insertColumns.map(() => "?").join(", ");
+    const values = insertColumns.map((column) => userData[column]);
 
     const [result] = await pool.query(
-      `INSERT INTO users (name, email, password_hash, role, is_verified, created_at)
-       VALUES (?, ?, ?, 'user', 0, NOW())`,
-      [String(name).trim(), cleanEmail, hash]
+      `INSERT INTO users (${insertColumns.join(", ")}) VALUES (${placeholders})`,
+      values
     );
 
     // Optional email
@@ -2832,8 +2887,9 @@ router.post("/create-user", auth, adminOnly, async (req, res) => {
       console.log("Mail failed:", String(e));
     }
 
-    return res.json({ message: "User created", user_id: result.insertId });
+    return res.json({ message: "User created and can now log in", user_id: result.insertId });
   } catch (err) {
+    console.error("[admin.create-user] failed:", err);
     return res.status(500).json({ message: "Server error", error: String(err) });
   }
 });
