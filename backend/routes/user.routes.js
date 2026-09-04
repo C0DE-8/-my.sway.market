@@ -237,8 +237,6 @@ async function findUserBalances(userId) {
   );
   return rows;
 }
-const path = require("path");
-const fs = require("fs");
 const multer = require("multer");
 const { v2: cloudinary } = require("cloudinary");
 
@@ -268,12 +266,12 @@ function cloudinaryReady() {
   return Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
 }
 
-function uploadDepositProofToCloudinary(file, asset) {
+function uploadBufferToCloudinary(file, folder, prefix) {
   return new Promise((resolve, reject) => {
-    const publicId = `${String(asset).toLowerCase()}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const publicId = `${String(prefix).toLowerCase()}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const stream = cloudinary.uploader.upload_stream(
       {
-        folder: "sway/deposit-proofs",
+        folder,
         public_id: publicId,
         resource_type: "auto",
       },
@@ -294,15 +292,35 @@ async function storeDepositProof(file, asset) {
     throw error;
   }
 
-  return uploadDepositProofToCloudinary(file, asset);
+  return uploadBufferToCloudinary(file, "sway/deposit-proofs", asset);
+}
+
+function requireCloudinaryUpload(file, folder, prefix, label) {
+  if (!cloudinaryReady()) {
+    const error = new Error(`Cloudinary is not configured for ${label} uploads`);
+    error.statusCode = 503;
+    throw error;
+  }
+
+  return uploadBufferToCloudinary(file, folder, prefix);
+}
+
+function publicUploadFromStoredValue(req, folder, storedValue, keyPrefix) {
+  const pathKey = `${keyPrefix}_path`;
+  const urlKey = `${keyPrefix}_url`;
+  if (!storedValue) return { [pathKey]: null, [urlKey]: null };
+  if (isAbsoluteUrl(storedValue)) return { [pathKey]: null, [urlKey]: storedValue };
+
+  const upload_path = `/uploads/${folder}/${storedValue}`;
+  return { [pathKey]: upload_path, [urlKey]: `${req.protocol}://${req.get("host")}${upload_path}` };
 }
 
 function depositProofFromStoredValue(req, storedValue) {
-  if (!storedValue) return { proof_path: null, proof_url: null };
-  if (isAbsoluteUrl(storedValue)) return { proof_path: null, proof_url: storedValue };
+  return publicUploadFromStoredValue(req, "deposits", storedValue, "proof");
+}
 
-  const proof_path = `/uploads/deposits/${storedValue}`;
-  return { proof_path, proof_url: `${req.protocol}://${req.get("host")}${proof_path}` };
+function traderImageFromStoredValue(req, storedValue) {
+  return publicUploadFromStoredValue(req, "traders", storedValue, "image").image_url;
 }
 
 // allowed crypto assets
@@ -1640,6 +1658,10 @@ router.post("/kyc/submit",auth,
         });
       }
 
+      const selfieUrl = await requireCloudinaryUpload(selfie, "sway/kyc", `kyc_${userId}_selfie`, "KYC");
+      const idFrontUrl = await requireCloudinaryUpload(idFront, "sway/kyc", `kyc_${userId}_id_front`, "KYC");
+      const idBackUrl = await requireCloudinaryUpload(idBack, "sway/kyc", `kyc_${userId}_id_back`, "KYC");
+
       await conn.beginTransaction();
 
       // if user already has KYC, update it + set pending again
@@ -1664,7 +1686,7 @@ router.post("/kyc/submit",auth,
               updated_at = NOW()
           WHERE user_id = ?
           `,
-          [selfie.filename, idFront.filename, idBack.filename, userId]
+          [selfieUrl, idFrontUrl, idBackUrl, userId]
         );
       } else {
         await conn.query(
@@ -1674,7 +1696,7 @@ router.post("/kyc/submit",auth,
             status, created_at, updated_at
           ) VALUES (?, ?, ?, ?, 'pending', NOW(), NOW())
           `,
-          [userId, selfie.filename, idFront.filename, idBack.filename]
+          [userId, selfieUrl, idFrontUrl, idBackUrl]
         );
       }
 
@@ -1686,7 +1708,10 @@ router.post("/kyc/submit",auth,
       });
     } catch (err) {
       try { await conn.rollback(); } catch (_) {}
-      return res.status(500).json({ message: "Server error", error: String(err) });
+      return res.status(err.statusCode || 500).json({
+        message: err.statusCode === 503 ? err.message : "Server error",
+        error: String(err),
+      });
     } finally {
       conn.release();
     }
@@ -1717,18 +1742,13 @@ router.get("/kyc", auth, async (req, res) => {
     }
 
     const d = rows[0];
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-
-    const selfie_path = `/uploads/kyc/${d.selfie_filename}`;
-    const id_front_path = `/uploads/kyc/${d.id_front_filename}`;
-    const id_back_path = `/uploads/kyc/${d.id_back_filename}`;
 
     return res.json({
       kyc: {
         ...d,
-        selfie_url: `${baseUrl}${selfie_path}`,
-        id_front_url: `${baseUrl}${id_front_path}`,
-        id_back_url: `${baseUrl}${id_back_path}`,
+        ...publicUploadFromStoredValue(req, "kyc", d.selfie_filename, "selfie"),
+        ...publicUploadFromStoredValue(req, "kyc", d.id_front_filename, "id_front"),
+        ...publicUploadFromStoredValue(req, "kyc", d.id_back_filename, "id_back"),
       },
     });
   } catch (err) {
@@ -1905,8 +1925,6 @@ router.get("/copy-traders/status", auth, async (req, res) => {
     }
 
     const r = rows[0];
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-
     return res.json({
       copy_trading_status: r.copy_trading_status, // active | lock
       copied_trader_id: r.copied_trader_id,
@@ -1916,9 +1934,7 @@ router.get("/copy-traders/status", auth, async (req, res) => {
             trader_name: r.trader_name,
             win_rate_percent: r.win_rate_percent,
             profit_percent: r.profit_percent,
-            image_url: r.image_filename
-              ? `${baseUrl}/uploads/traders/${r.image_filename}`
-              : null
+            image_url: traderImageFromStoredValue(req, r.image_filename)
           }
         : null
     });
@@ -1943,16 +1959,12 @@ router.get("/copy-traders", auth, async (req, res) => {
       `
     );
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-
     const traders = rows.map((t) => ({
       id: t.id,
       trader_name: t.trader_name,
       win_rate_percent: t.win_rate_percent,
       profit_percent: t.profit_percent,
-      image_url: t.image_filename
-        ? `${baseUrl}/uploads/traders/${t.image_filename}`
-        : null
+      image_url: traderImageFromStoredValue(req, t.image_filename)
     }));
 
     return res.json({
@@ -1994,7 +2006,6 @@ router.get("/copy-traders/:id", auth, async (req, res) => {
       return res.status(404).json({ message: "Trader not found or inactive" });
     }
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
     const t = rows[0];
 
     return res.json({
@@ -2003,9 +2014,7 @@ router.get("/copy-traders/:id", auth, async (req, res) => {
         trader_name: t.trader_name,
         win_rate_percent: t.win_rate_percent,
         profit_percent: t.profit_percent,
-        image_url: t.image_filename
-          ? `${baseUrl}/uploads/traders/${t.image_filename}`
-          : null
+        image_url: traderImageFromStoredValue(req, t.image_filename)
       }
     });
   } catch (err) {
@@ -2098,7 +2107,6 @@ router.post("/account-upgrades", auth, upsUpload.single("proof"), async (req, re
     const note = req.body?.note ? String(req.body.note).trim() : null;
 
     if (!requested_account_type) {
-      if (req.file) fs.unlink(req.file.path, () => {});
       return res.status(400).json({ message: "requested_account_type is required" });
     }
 
@@ -2109,14 +2117,12 @@ router.post("/account-upgrades", auth, upsUpload.single("proof"), async (req, re
     );
 
     if (!uRows.length) {
-      if (req.file) fs.unlink(req.file.path, () => {});
       return res.status(404).json({ message: "User not found" });
     }
 
     const current_account_type = String(uRows[0].account_type || "").trim();
 
     if (current_account_type === requested_account_type) {
-      if (req.file) fs.unlink(req.file.path, () => {});
       return res.status(400).json({ message: "You already have this account type" });
     }
 
@@ -2132,11 +2138,12 @@ router.post("/account-upgrades", auth, upsUpload.single("proof"), async (req, re
     );
 
     if (pRows.length) {
-      if (req.file) fs.unlink(req.file.path, () => {});
       return res.status(400).json({ message: "You already have a pending upgrade request" });
     }
 
-    const proof_filename = req.file ? req.file.filename : null;
+    const proof_filename = req.file
+      ? await requireCloudinaryUpload(req.file, "sway/upgrade-proofs", `upgrade_${userId}`, "account upgrade")
+      : null;
 
     const [r] = await pool.query(
       `
@@ -2148,8 +2155,7 @@ router.post("/account-upgrades", auth, upsUpload.single("proof"), async (req, re
       [userId, requested_account_type, current_account_type, note, proof_filename]
     );
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-    const proof_path = proof_filename ? `/uploads/upgrades/${proof_filename}` : null;
+    const proof = publicUploadFromStoredValue(req, "upgrades", proof_filename, "proof");
 
     return res.json({
       message: "Upgrade request submitted and pending approval",
@@ -2159,13 +2165,14 @@ router.post("/account-upgrades", auth, upsUpload.single("proof"), async (req, re
         current_account_type,
         note,
         status: "pending",
-        proof_path,
-        proof_url: proof_path ? `${baseUrl}${proof_path}` : null
+        ...proof
       }
     });
   } catch (err) {
-    if (req.file) fs.unlink(req.file.path, () => {});
-    return res.status(500).json({ message: "Server error", error: String(err) });
+    return res.status(err.statusCode || 500).json({
+      message: err.statusCode === 503 ? err.message : "Server error",
+      error: String(err),
+    });
   }
 });
 // ========================= USER: Get My Upgrade Requests ========================= //
@@ -2194,16 +2201,10 @@ router.get("/account-upgrades", auth, async (req, res) => {
       [userId]
     );
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-
-    const upgrades = rows.map((u) => {
-      const proof_path = u.proof_filename ? `/uploads/upgrades/${u.proof_filename}` : null;
-      return {
-        ...u,
-        proof_path,
-        proof_url: proof_path ? `${baseUrl}${proof_path}` : null
-      };
-    });
+    const upgrades = rows.map((u) => ({
+      ...u,
+      ...publicUploadFromStoredValue(req, "upgrades", u.proof_filename, "proof"),
+    }));
 
     return res.json({ count: upgrades.length, upgrades });
   } catch (err) {

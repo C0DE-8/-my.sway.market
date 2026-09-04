@@ -482,6 +482,10 @@ async function migrate() {
       PRIMARY KEY (id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+  await addColumn("copy_traders", "is_active", "TINYINT(1) NOT NULL DEFAULT 1");
+  if (await columnExists("copy_traders", "status")) {
+    await run("UPDATE copy_traders SET is_active = CASE WHEN status = 'active' THEN 1 ELSE 0 END");
+  }
 
   await createTable("notifications", `
     CREATE TABLE IF NOT EXISTS notifications (

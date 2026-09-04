@@ -186,6 +186,38 @@ function depositProofFromStoredValue(req, storedValue) {
   return { proof_path, proof_url: `${baseUrl(req)}${proof_path}` };
 }
 
+function uploadedFileUrl(req, folder, storedValue) {
+  if (!storedValue) return null;
+  if (isAbsoluteUrl(storedValue)) return storedValue;
+  return `${baseUrl(req)}/uploads/${folder}/${storedValue}`;
+}
+
+function uploadTraderImageToCloudinary(file) {
+  if (!file) return Promise.resolve(null);
+  if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+    return Promise.reject(new Error("Cloudinary is not configured"));
+  }
+
+  const publicId = `trader_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "sway/traders",
+        public_id: publicId,
+        resource_type: "image",
+        overwrite: false,
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result.secure_url);
+      }
+    );
+
+    stream.end(file.buffer);
+  });
+}
+
 function cloudinaryPublicIdFromUrl(url) {
   try {
     const parsed = new URL(url);
@@ -2030,6 +2062,13 @@ router.get("/kyc", auth, adminOnly, async (req, res) => {
       params
     );
 
+    const kycList = rows.map((k) => ({
+      ...k,
+      selfie_url: uploadedFileUrl(req, "kyc", k.selfie_filename),
+      id_front_url: uploadedFileUrl(req, "kyc", k.id_front_filename),
+      id_back_url: uploadedFileUrl(req, "kyc", k.id_back_filename),
+    }));
+
     return res.json({
       meta: {
         page: pageNum,
@@ -2037,7 +2076,7 @@ router.get("/kyc", auth, adminOnly, async (req, res) => {
         total: countRows[0].total,
         total_pages: Math.ceil(countRows[0].total / limitNum),
       },
-      kyc_list: rows,
+      kyc_list: kycList,
     });
   } catch (err) {
     return res.status(500).json({ message: "Server error", error: String(err) });
@@ -2070,14 +2109,13 @@ router.get("/kyc/:id", auth, adminOnly, async (req, res) => {
     if (!rows.length) return res.status(404).json({ message: "KYC not found" });
 
     const d = rows[0];
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
 
     return res.json({
       kyc: {
         ...d,
-        selfie_url: `${baseUrl}/uploads/kyc/${d.selfie_filename}`,
-        id_front_url: `${baseUrl}/uploads/kyc/${d.id_front_filename}`,
-        id_back_url: `${baseUrl}/uploads/kyc/${d.id_back_filename}`,
+        selfie_url: uploadedFileUrl(req, "kyc", d.selfie_filename),
+        id_front_url: uploadedFileUrl(req, "kyc", d.id_front_filename),
+        id_back_url: uploadedFileUrl(req, "kyc", d.id_back_filename),
       },
     });
   } catch (err) {
@@ -2172,7 +2210,7 @@ router.post("/copy-traders", auth, adminOnly, traderUpload.single("image"), asyn
       return res.status(400).json({ message: "Invalid profit_percent" });
     }
 
-    const image_filename = req.file ? req.file.filename : null;
+    const image_filename = req.file ? await uploadTraderImageToCloudinary(req.file) : null;
 
     const [result] = await pool.query(
       `
@@ -2235,7 +2273,7 @@ router.put("/copy-traders/:id", auth, adminOnly, traderUpload.single("image"), a
     // if new image uploaded
     if (req.file) {
       fields.push("image_filename = ?");
-      params.push(req.file.filename);
+      params.push(await uploadTraderImageToCloudinary(req.file));
     }
 
     if (!fields.length) {
@@ -2273,11 +2311,9 @@ router.get("/copy-traders", auth, adminOnly, async (req, res) => {
       `
     );
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-
     const traders = rows.map((t) => ({
       ...t,
-      image_url: t.image_filename ? `${baseUrl}/uploads/traders/${t.image_filename}` : null
+      image_url: uploadedFileUrl(req, "traders", t.image_filename)
     }));
 
     return res.json({ count: traders.length, traders });
@@ -2307,13 +2343,12 @@ router.get("/copy-traders/:id", auth, adminOnly, async (req, res) => {
 
     if (!rows.length) return res.status(404).json({ message: "Copy trader not found" });
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
     const t = rows[0];
 
     return res.json({
       trader: {
         ...t,
-        image_url: t.image_filename ? `${baseUrl}/uploads/traders/${t.image_filename}` : null
+        image_url: uploadedFileUrl(req, "traders", t.image_filename)
       }
     });
   } catch (err) {
@@ -2905,11 +2940,13 @@ router.get("/account-upgrades", auth, adminOnly, async (req, res) => {
       params
     );
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-
     const upgrades = rows.map((u) => {
-      const proof_path = u.proof_filename ? `/uploads/upgrades/${u.proof_filename}` : null;
-      return { ...u, proof_path, proof_url: proof_path ? `${baseUrl}${proof_path}` : null };
+      const proof_url = uploadedFileUrl(req, "upgrades", u.proof_filename);
+      return {
+        ...u,
+        proof_path: isAbsoluteUrl(u.proof_filename) ? null : (u.proof_filename ? `/uploads/upgrades/${u.proof_filename}` : null),
+        proof_url,
+      };
     });
 
     return res.json({
