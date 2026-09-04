@@ -240,7 +240,7 @@
         // ✅ IMPORTANT: call /login-no-email
         const res = await axios.post(`${API_BASE}/login-no-email`, { identifier, password }, {
           headers: { "Content-Type": "application/json" },
-          timeout: 20000,
+          timeout: 60000,
         });
 
         const data = res.data || {};

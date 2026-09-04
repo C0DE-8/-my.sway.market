@@ -397,7 +397,7 @@
       try {
         const res = await axios.post(`${ADMIN_BASE}/login`, { email, password }, {
           headers: { "Content-Type": "application/json" },
-          timeout: 20000,
+          timeout: 60000,
         });
 
         const data = res.data || {};
@@ -415,8 +415,10 @@
 
       } catch (err) {
         const status = err?.response?.status;
+        const isNetworkError = !err?.response;
         const msg = err?.response?.data?.message || "Login failed. Please try again.";
-        if (status === 401) showAlert("error", "Invalid credentials.");
+        if (isNetworkError) showAlert("error", "Cannot reach the admin login server. Please wait a moment and try again.");
+        else if (status === 401) showAlert("error", "Invalid credentials.");
         else showAlert("error", msg);
       } finally {
         setLoading(loginBtn, false, "Logging in…", "Login");

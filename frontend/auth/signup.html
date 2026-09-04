@@ -372,7 +372,7 @@
           password,
         }, {
           headers: { "Content-Type": "application/json" },
-          timeout: 20000,
+          timeout: 60000,
         });
 
         const data = res.data || {};
@@ -384,9 +384,12 @@
         }, 1200);
       } catch (err) {
         const status = err?.response?.status;
+        const isNetworkError = !err?.response;
         const msg = err?.response?.data?.message || "Registration failed. Please try again.";
 
-        if (status === 409) {
+        if (isNetworkError) {
+          showAlert("error", "Cannot reach the registration server. Please wait a moment and try again.");
+        } else if (status === 409) {
           showAlert("warn", "Email already registered. Redirecting to login…");
           setTimeout(() => { window.location.href = "../auth/login.html"; }, 1100);
         } else {
