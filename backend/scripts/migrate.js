@@ -1,5 +1,6 @@
 require("dotenv").config();
 
+const bcrypt = require("bcrypt");
 const db = require("../db");
 
 const TABLE_RE = /^[A-Za-z0-9_]+$/;
@@ -136,6 +137,97 @@ async function migrateUsers() {
   await maybe("ALTER TABLE users ADD UNIQUE KEY users_email_unique (email)", "users email unique index");
 }
 
+function makeProfileId(prefix) {
+  return `SWY-${prefix}-${Date.now().toString(36).toUpperCase()}`;
+}
+
+async function upsertUserAccount({ fullName, email, username, password, role = "user", isAdmin = 0 }) {
+  const columns = new Set((await query("DESCRIBE users")).map((row) => row.Field));
+  const hash = await bcrypt.hash(password, 12);
+  const cleanEmail = String(email).trim().toLowerCase();
+  const data = {};
+
+  function add(name, value) {
+    if (columns.has(name)) data[name] = value;
+  }
+
+  add("profile_id", makeProfileId(username.toUpperCase()));
+  add("name", fullName);
+  add("full_name", fullName);
+  add("email", cleanEmail);
+  add("username", username);
+  add("password", hash);
+  add("password_hash", hash);
+  add("phone_number", "0000000000");
+  add("phone", "0000000000");
+  add("address", "N/A");
+  add("city", "N/A");
+  add("zipcode", null);
+  add("occupation", "N/A");
+  add("date_of_birth", "1970-01-01");
+  add("nationality", "N/A");
+  add("country", "N/A");
+  add("account_type", "individual");
+  add("base_currency", "USD");
+  add("is_verified", 1);
+  add("isAdmin", isAdmin);
+  add("role", role);
+  add("trading_balance", 0);
+  add("holding_balance", 0);
+  add("staking_balance", 0);
+  add("main_balance", 0);
+  add("profit_balance", 0);
+  add("investment_balance", 0);
+  add("withdraw_hold", 0);
+  add("signal_strength", 0);
+  add("trade_progress", 0);
+  add("account_status", "active");
+  add("copy_trading_status", "inactive");
+  add("trading_status", "active");
+
+  const [existing] = await query("SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1", [cleanEmail]);
+  if (existing) {
+    const update = { ...data };
+    delete update.profile_id;
+    delete update.email;
+    const assignments = Object.keys(update).map((column) => `${ident(column)} = ?`).join(", ");
+    await run(`UPDATE users SET ${assignments} WHERE id = ?`, [...Object.values(update), existing.id]);
+    console.log(`ok seeded user ${cleanEmail}`);
+    return;
+  }
+
+  const insertColumns = Object.keys(data);
+  const placeholders = insertColumns.map(() => "?").join(", ");
+  await run(
+    `INSERT INTO users (${insertColumns.map(ident).join(", ")}) VALUES (${placeholders})`,
+    insertColumns.map((column) => data[column])
+  );
+  console.log(`ok seeded user ${cleanEmail}`);
+}
+
+async function seedAuthAccounts() {
+  const adminHash = await bcrypt.hash("123456", 12);
+  await run(
+    `
+    INSERT INTO admins (name, email, password_hash, created_at, updated_at)
+    VALUES ('Admin User', 'admin@admin.com', ?, NOW(), NOW())
+    ON DUPLICATE KEY UPDATE
+      name = VALUES(name),
+      password_hash = VALUES(password_hash),
+      updated_at = NOW()
+    `,
+    [adminHash]
+  );
+  console.log("ok seeded admin admin@admin.com");
+
+  await upsertUserAccount({
+    fullName: "8amligt User",
+    email: "8amligt@gmail.com",
+    username: "8amligt",
+    password: "123456",
+  });
+}
+
 async function migrate() {
   await migrateUsers();
 
@@ -163,6 +255,8 @@ async function migrate() {
       updated_at = NOW()
   `);
   console.log("ok admins backfill");
+
+  await seedAuthAccounts();
 
   await createTable("email_otps", `
     CREATE TABLE IF NOT EXISTS email_otps (
