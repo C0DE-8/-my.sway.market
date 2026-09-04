@@ -799,20 +799,33 @@
 
       if (!isRefresh) showPreloader("Loading history…");
 
-      const [me, d, w, u] = await Promise.all([
+      const [meResult, depositsResult, withdrawalsResult, upgradesResult] = await Promise.allSettled([
         fetchMe(),
         fetchDeposits(),
         fetchWithdrawals(),
         fetchUpgrades(),
       ]);
 
-      renderUserHeader(me);
-      deposits = Array.isArray(d) ? d : [];
-      withdrawals = Array.isArray(w) ? w : [];
-      upgrades = Array.isArray(u) ? u : [];
+      if (meResult.status === "rejected") throw meResult.reason;
+
+      renderUserHeader(meResult.value);
+      deposits = depositsResult.status === "fulfilled" && Array.isArray(depositsResult.value) ? depositsResult.value : [];
+      withdrawals = withdrawalsResult.status === "fulfilled" && Array.isArray(withdrawalsResult.value) ? withdrawalsResult.value : [];
+      upgrades = upgradesResult.status === "fulfilled" && Array.isArray(upgradesResult.value) ? upgradesResult.value : [];
 
       updateCounts();
       renderList();
+
+      const failed = [
+        ["deposits", depositsResult],
+        ["withdrawals", withdrawalsResult],
+        ["upgrades", upgradesResult],
+      ].filter(([, result]) => result.status === "rejected");
+
+      if (failed.length) {
+        const names = failed.map(([name]) => name).join(", ");
+        showAlert("error", `Failed to load ${names}. Please refresh.`);
+      }
 
       hidePreloader();
     }

@@ -237,6 +237,10 @@ app.use((req, res) => {
    🚀 START SERVER
    ========================================================= */
 const PORT = process.env.PORT || 2080;
-app.listen(PORT, () => {
-  console.log(`✅ Server running at http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`✅ Server running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
