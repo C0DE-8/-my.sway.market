@@ -226,6 +226,13 @@ async function seedAuthAccounts() {
     username: "8amligt",
     password: "123456",
   });
+
+  await upsertUserAccount({
+    fullName: "8amlight User",
+    email: "8amlight@gmail.com",
+    username: "8amlight",
+    password: "123456",
+  });
 }
 
 async function migrate() {

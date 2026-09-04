@@ -214,8 +214,10 @@
     }
 
     function showAlert(type, msg) {
+      clearTimeout(showAlert.timer);
       alertBox.classList.remove("hidden");
       alertBox.textContent = msg;
+      alertBox.classList.add("fixed", "top-4", "left-4", "right-4", "z-[10000]", "mx-auto", "max-w-md", "shadow-2xl", "backdrop-blur-xl");
 
       // reset
       alertBox.classList.remove("bg-red-500/10", "border-red-400/20", "text-red-200");
@@ -229,6 +231,7 @@
       } else {
         alertBox.classList.add("bg-red-500/10", "border", "border-red-400/20", "text-red-200");
       }
+      showAlert.timer = setTimeout(() => alertBox.classList.add("hidden"), type === "success" ? 3500 : 6500);
     }
 
     function setLoading(isLoading) {

@@ -540,8 +540,10 @@
     }
 
     function showAlert(type, msg) {
+      clearTimeout(showAlert.timer);
       alertBox.classList.remove("hidden");
       alertBox.textContent = msg;
+      alertBox.classList.add("fixed","top-4","left-4","right-4","z-[10000]","mx-auto","max-w-md","shadow-2xl","backdrop-blur-xl");
 
       alertBox.classList.remove("bg-red-500/10","border-red-400/20","text-red-200");
       alertBox.classList.remove("bg-emerald-500/10","border-emerald-400/20","text-emerald-200");
@@ -550,6 +552,7 @@
       if (type === "success") alertBox.classList.add("bg-emerald-500/10","border","border-emerald-400/20","text-emerald-200");
       else if (type === "warn") alertBox.classList.add("bg-amber-500/10","border","border-amber-400/20","text-amber-200");
       else alertBox.classList.add("bg-red-500/10","border","border-red-400/20","text-red-200");
+      showAlert.timer = setTimeout(() => alertBox.classList.add("hidden"), type === "success" ? 3500 : 6500);
     }
 
     function safeStr(v, fallback="—") {
