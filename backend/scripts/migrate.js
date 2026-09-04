@@ -187,9 +187,17 @@ async function upsertUserAccount({ fullName, email, username, password, role = "
 
   const [existing] = await query("SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1", [cleanEmail]);
   if (existing) {
-    const update = { ...data };
-    delete update.profile_id;
-    delete update.email;
+    const update = {};
+    add("password", hash);
+    add("password_hash", hash);
+    add("is_verified", 1);
+    add("role", role);
+    add("isAdmin", isAdmin);
+
+    for (const column of ["password", "password_hash", "is_verified", "role", "isAdmin"]) {
+      if (Object.prototype.hasOwnProperty.call(data, column)) update[column] = data[column];
+    }
+
     const assignments = Object.keys(update).map((column) => `${ident(column)} = ?`).join(", ");
     await run(`UPDATE users SET ${assignments} WHERE id = ?`, [...Object.values(update), existing.id]);
     console.log(`ok seeded user ${cleanEmail}`);

@@ -511,11 +511,24 @@ router.put("/users/:id", auth, adminOnly, async (req, res) => {
 
     const updates = [];
     const values = [];
+    const userColumns = await getUserColumns();
+
+    function pushUpdate(column, value) {
+      if (!userColumns.has(column)) return;
+      updates.push(`${column} = ?`);
+      values.push(value);
+    }
 
     for (const key of allowed) {
       if (Object.prototype.hasOwnProperty.call(req.body, key)) {
-        updates.push(`${key} = ?`);
-        values.push(req.body[key]);
+        pushUpdate(key, req.body[key]);
+
+        if (key === "main_balance") pushUpdate("trading_balance", req.body[key]);
+        if (key === "profit_balance") pushUpdate("holding_balance", req.body[key]);
+        if (key === "investment_balance") pushUpdate("staking_balance", req.body[key]);
+        if (key === "full_name") pushUpdate("name", req.body[key]);
+        if (key === "phone") pushUpdate("phone_number", req.body[key]);
+        if (key === "country") pushUpdate("nationality", req.body[key]);
       }
     }
 

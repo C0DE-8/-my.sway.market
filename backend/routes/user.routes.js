@@ -26,6 +26,18 @@ function addIfColumn(columns, data, name, value) {
   if (columns.has(name)) data[name] = value;
 }
 
+function balanceSelect(columns, modernColumn, legacyColumn) {
+  const hasModern = columns.has(modernColumn);
+  const hasLegacy = columns.has(legacyColumn);
+
+  if (hasModern && hasLegacy) {
+    return `CASE WHEN ${modernColumn} = 0 AND ${legacyColumn} != 0 THEN ${legacyColumn} ELSE ${modernColumn} END AS ${modernColumn}`;
+  }
+  if (hasModern) return modernColumn;
+  if (hasLegacy) return `${legacyColumn} AS ${modernColumn}`;
+  return `0 AS ${modernColumn}`;
+}
+
 function makeProfileId() {
   return `SWY-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 }
@@ -115,6 +127,8 @@ async function findLoginUser(cleanIdentifier) {
 }
 
 async function findUserProfile(userId) {
+  const columns = await getUserColumns();
+
   try {
     const [rows] = await pool.query(
       `
@@ -131,9 +145,9 @@ async function findUserProfile(userId) {
         role,
         is_verified,
 
-        main_balance,
-        profit_balance,
-        investment_balance,
+        ${balanceSelect(columns, "main_balance", "trading_balance")},
+        ${balanceSelect(columns, "profit_balance", "holding_balance")},
+        ${balanceSelect(columns, "investment_balance", "staking_balance")},
 
         account_type,
         trade_progress,
@@ -193,13 +207,15 @@ async function findUserProfile(userId) {
 }
 
 async function findUserBalances(userId) {
+  const columns = await getUserColumns();
+
   try {
     const [rows] = await pool.query(
       `
       SELECT
-        main_balance,
-        profit_balance,
-        investment_balance,
+        ${balanceSelect(columns, "main_balance", "trading_balance")},
+        ${balanceSelect(columns, "profit_balance", "holding_balance")},
+        ${balanceSelect(columns, "investment_balance", "staking_balance")},
         account_type,
         trade_progress,
         signal_strength,
