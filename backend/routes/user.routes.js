@@ -240,22 +240,16 @@ async function findUserBalances(userId) {
 const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
+const { v2: cloudinary } = require("cloudinary");
 
-// folder: backend/uploads/deposits
-const DEPOSIT_UPLOAD_DIR = path.join(__dirname, "..", "uploads", "deposits");
-fs.mkdirSync(DEPOSIT_UPLOAD_DIR, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, DEPOSIT_UPLOAD_DIR),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || "").toLowerCase() || ".png";
-    const name = `deposit_${Date.now()}_${Math.random().toString(16).slice(2)}${ext}`;
-    cb(null, name);
-  },
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
     const ok = [
@@ -269,6 +263,47 @@ const upload = multer({
     cb(ok ? null : new Error("Only images (png/jpg/webp) or pdf allowed"), ok);
   },
 });
+
+function cloudinaryReady() {
+  return Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
+}
+
+function uploadDepositProofToCloudinary(file, asset) {
+  return new Promise((resolve, reject) => {
+    const publicId = `${String(asset).toLowerCase()}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "sway/deposit-proofs",
+        public_id: publicId,
+        resource_type: "auto",
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result.secure_url);
+      }
+    );
+
+    stream.end(file.buffer);
+  });
+}
+
+async function storeDepositProof(file, asset) {
+  if (!cloudinaryReady()) {
+    const error = new Error("Cloudinary is not configured for deposit uploads");
+    error.statusCode = 503;
+    throw error;
+  }
+
+  return uploadDepositProofToCloudinary(file, asset);
+}
+
+function depositProofFromStoredValue(req, storedValue) {
+  if (!storedValue) return { proof_path: null, proof_url: null };
+  if (isAbsoluteUrl(storedValue)) return { proof_path: null, proof_url: storedValue };
+
+  const proof_path = `/uploads/deposits/${storedValue}`;
+  return { proof_path, proof_url: `${req.protocol}://${req.get("host")}${proof_path}` };
+}
 
 // allowed crypto assets
 const ALLOWED_ASSETS = ["BTC","ETH","USDT","BNB","LTC","DOGE","XRP","SHIB","SOL"];
@@ -700,7 +735,10 @@ router.get("/wallet-addresses", auth, async (req, res) => {
 
     return res.json({ count: wallets.length, wallets });
   } catch (err) {
-    return res.status(500).json({ message: "Server error", error: String(err) });
+    return res.status(err.statusCode || 500).json({
+      message: err.statusCode === 503 ? err.message : "Server error",
+      error: String(err),
+    });
   }
 });
 // -------------------------- GET /api/users/wallet-addresses/:id --------------------------
@@ -754,12 +792,10 @@ router.post("/deposits", auth, upload.single("proof"), async (req, res) => {
     const allowed = new Set(["BTC", "ETH", "USDT", "BNB", "LTC", "DOGE", "XRP", "SHIB", "SOL"]);
 
     if (!allowed.has(cleanAsset)) {
-      if (req.file) fs.unlink(req.file.path, () => {});
       return res.status(400).json({ message: "Invalid deposit method (asset)" });
     }
 
     if (!amount || Number.isNaN(cleanAmount) || cleanAmount <= 0) {
-      if (req.file) fs.unlink(req.file.path, () => {});
       return res.status(400).json({ message: "Valid deposit amount is required" });
     }
 
@@ -768,9 +804,8 @@ router.post("/deposits", auth, upload.single("proof"), async (req, res) => {
       return res.status(400).json({ message: "Proof of payment is required (upload file 'proof')" });
     }
 
-    const proof_filename = req.file.filename;
-    const proof_path = `/uploads/deposits/${proof_filename}`;
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const proof_filename = await storeDepositProof(req.file, cleanAsset);
+    const proof = depositProofFromStoredValue(req, proof_filename);
 
     const [r] = await pool.query(
       `
@@ -787,12 +822,10 @@ router.post("/deposits", auth, upload.single("proof"), async (req, res) => {
         asset: cleanAsset,
         amount: String(amount),
         status: "pending",
-        proof_path,
-        proof_url: `${baseUrl}${proof_path}`,
+        ...proof,
       },
     });
   } catch (err) {
-    if (req.file) fs.unlink(req.file.path, () => {});
     return res.status(500).json({ message: "Server error", error: String(err) });
   }
 });
@@ -821,12 +854,8 @@ router.get("/deposits", auth, async (req, res) => {
       [userId]
     );
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-
     const deposits = rows.map((d) => {
-      const proof_path = d.proof_filename
-        ? `/uploads/deposits/${d.proof_filename}`
-        : null;
+      const proof = depositProofFromStoredValue(req, d.proof_filename);
 
       return {
         id: d.id,
@@ -834,8 +863,7 @@ router.get("/deposits", auth, async (req, res) => {
         amount: d.amount,
         status: d.status,
         admin_note: d.admin_note,
-        proof_path,
-        proof_url: proof_path ? `${baseUrl}${proof_path}` : null,
+        ...proof,
         approved_at: d.approved_at,
         declined_at: d.declined_at,
         created_at: d.created_at,
@@ -896,10 +924,7 @@ router.get("/deposits/:id", auth, async (req, res) => {
 
     const d = rows[0];
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-    const proof_path = d.proof_filename
-      ? `/uploads/deposits/${d.proof_filename}`
-      : null;
+    const proof = depositProofFromStoredValue(req, d.proof_filename);
 
     return res.json({
       id: d.id,
@@ -908,8 +933,7 @@ router.get("/deposits/:id", auth, async (req, res) => {
       amount: d.amount,
       status: d.status,
       admin_note: d.admin_note,
-      proof_path,
-      proof_url: proof_path ? `${baseUrl}${proof_path}` : null,
+      ...proof,
       approved_at: d.approved_at,
       declined_at: d.declined_at,
       created_at: d.created_at,

@@ -178,6 +178,14 @@ function walletQrFromStoredValue(req, storedValue) {
   return { qr_path, qr_url: fileUrl(req, qr_path) };
 }
 
+function depositProofFromStoredValue(req, storedValue) {
+  if (!storedValue) return { proof_path: null, proof_url: null };
+  if (isAbsoluteUrl(storedValue)) return { proof_path: null, proof_url: storedValue };
+
+  const proof_path = `/uploads/deposits/${storedValue}`;
+  return { proof_path, proof_url: `${baseUrl(req)}${proof_path}` };
+}
+
 function cloudinaryPublicIdFromUrl(url) {
   try {
     const parsed = new URL(url);
@@ -1041,14 +1049,10 @@ router.get("/deposits", auth, adminOnly, async (req, res) => {
 
     const [rows] = await pool.query(sql, vals);
 
-    const deposits = rows.map((d) => {
-      const proof_path = d.proof_filename ? `/uploads/deposits/${d.proof_filename}` : null;
-      return {
-        ...d,
-        proof_path,
-        proof_url: proof_path ? `${baseUrl(req)}${proof_path}` : null,
-      };
-    });
+    const deposits = rows.map((d) => ({
+      ...d,
+      ...depositProofFromStoredValue(req, d.proof_filename),
+    }));
 
     return res.json({ count: deposits.length, deposits });
   } catch (err) {
@@ -1091,13 +1095,11 @@ router.get("/deposits/:id", auth, adminOnly, async (req, res) => {
     if (!rows.length) return res.status(404).json({ message: "Deposit not found" });
 
     const d = rows[0];
-    const proof_path = d.proof_filename ? `/uploads/deposits/${d.proof_filename}` : null;
 
     return res.json({
       deposit: {
         ...d,
-        proof_path,
-        proof_url: proof_path ? `${baseUrl(req)}${proof_path}` : null,
+        ...depositProofFromStoredValue(req, d.proof_filename),
       },
     });
   } catch (err) {
